@@ -28,6 +28,7 @@ p_load(tidyverse,
        lmerTest,
        nlme,
        glmmTMB,
+       brms,
        merTools,
        bbmle,
        zctaCrosswalk,
@@ -345,10 +346,16 @@ df_mort_99 <- df_mort[!outliers$Outlier, ]
 
 hist(df_mort_99$covid_mortality_rate_100k) # ostensibly normally distributed
 
+#Save df_mort_99
+
+save(df_mort_99, file = "/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort_99.rda")
+
 ```
 
 
 ```{r}
+
+load("/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort_99.rda")
 #Checking cell counts of strata is sufficient for analysis
 
 strata_df <- df_mort_99 %>%
@@ -369,6 +376,81 @@ ggplot(strata_df, aes(reorder(strata, covid_mortality_rate_100k, FUN = median), 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
+
+```
+#Model selection    
+
+```{r}
+
+lmer1 <- lmer(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_99)
+summary(lmer1)
+check_model(lmer1)
+
+glmm1 <- glmmTMB(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_99, family = "gaussian")
+summary(glmm1)
+check_model(glmm1)
+
+brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_99, family = "gaussian")
+summary(brms1)
+check_model(brms1)
+loo(brms1)
+
+
+compare_performance(lmer1, glmm1, rank = TRUE) #glmm1 is preferred
+
+```
+#Going to try with GLMM
+
+```{r}
+colnames(df_mort_99)
+#Unadjusted
+
+glmm1 <- glmmTMB(covid_mortality_rate_100k ~ 1 + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_99, family = "gaussian")
+summary(glmm1)
+AIC(glmm1) #30833.53
+icc(glmm1)$ICC_adjusted #0.33
+check_model(glmm1)
+
+
+#Adjusted with continuous strata
+
+glmm2 <- glmmTMB(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(white_non_ratio) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata:strata_race_cat), df_mort_99, family = "gaussian")
+summary(glmm2)
+AIC(glmm2) #30586.19
+icc(glmm2)$ICC_adjusted #0.33
+check_model(glmm2)
+
+
+#Adjusted with categorical strata
+
+glmm3 <- glmmTMB(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_99, family = "gaussian")
+summary(glmm3)
+AIC(glmm3) #30670.15
+icc(glmm3)$ICC_adjusted #0.33
+check_model(glmm3)
+
+```
+
+#Bayesian
+
+```{r}
+brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_99, family = "gaussian")
+summary(brms1)
+check_model(brms1)
+loo(brms1) #looic 30676
+
+
+brms2 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(white_non_ratio) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_99, family = "gaussian")
+summary(brms2)
+plot(brms2)
+
+
+brms3 <- brm(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_99, family = "gaussian")
+summary(brms2)
+
+
+
+loo(brms1, brms3)
 
 ```
 
