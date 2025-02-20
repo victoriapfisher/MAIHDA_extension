@@ -54,7 +54,11 @@ p_load(tidyverse,
        clusterSim,
        geepack,
        geeM,
-       cardx)
+       cardx,
+       insight,
+       parameters,
+       ggeffects,
+       emmeans)
 
 options(tigris_use_cache = FALSE)
 
@@ -80,68 +84,9 @@ v2020 <- load_variables(2020, "acs5")
 
 vars <- c(county_male_pop = "B01001_002",
           county_white_pop = "B02001_002",
-          county_black_pop = "B02001_003",
-          county_asian_pop = "B02001_005",
-          county_hispanic_pop = "B03002_012",
-          county_two_race_plus_pop = "B02001_008",
-          age_grp_male_under_5 = "B01001_003",
-          age_grp_male_5_9 = "B01001_004",
-          age_grp_male_10_14 = "B01001_005",
-          age_grp_male_15_17 = "B01001_006",
-          age_grp_male_18_19 = "B01001_007",
-          age_grp_male_20 = "B01001_008",
-          age_grp_male_21 = "B01001_009",
-          age_grp_male_22_24 = "B01001_010",
-          age_grp_male_25_29 = "B01001_011",
-          age_grp_male_30_34 = "B01001_012",
-          age_grp_male_35_39 = "B01001_013",
-          age_grp_male_40_44 = "B01001_014",
-          age_grp_male_45_49 = "B01001_015",
-          age_grp_male_50_54 = "B01001_016",
-          age_grp_male_55_59 = "B01001_017",
-          age_grp_male_60_61 = "B01001_018",
-          age_grp_male_62_64 = "B01001_019",
-          age_grp_male_65_66 = "B01001_020",
-          age_grp_male_67_69 = "B01001_021",
-          age_grp_male_70_74 = "B01001_022",
-          age_grp_male_75_79 = "B01001_023",
-          age_grp_male_80_84 = "B01001_024",
-          age_grp_male_85_older = "B01001_025",
-          age_grp_female_under_5 = "B01001_027",
-          age_grp_female_5_9 = "B01001_028",
-          age_grp_female_10_14 = "B01001_029",
-          age_grp_female_15_17 = "B01001_030",
-          age_grp_female_18_19 = "B01001_031",
-          age_grp_female_20 = "B01001_032",
-          age_grp_female_21 = "B01001_033",
-          age_grp_female_22_24 = "B01001_034",
-          age_grp_female_25_29 = "B01001_035",
-          age_grp_female_30_34 = "B01001_036",
-          age_grp_female_35_39 = "B01001_037",
-          age_grp_female_40_44 = "B01001_038",
-          age_grp_female_45_49 = "B01001_039",
-          age_grp_female_50_54 = "B01001_040",
-          age_grp_female_55_59 = "B01001_041",
-          age_grp_female_60_61 = "B01001_042",
-          age_grp_female_62_64 = "B01001_043",
-          age_grp_female_65_66 = "B01001_044",
-          age_grp_female_67_69 = "B01001_045",
-          age_grp_female_70_74 = "B01001_046",
-          age_grp_female_75_79 = "B01001_047",
-          age_grp_female_80_84 = "B01001_048",
-          age_grp_female_85_older = "B01001_049",
           median_age_total = "B01002_001",
-          median_age_male = "B01002_002",
-          median_age_female = "B01002_003",
-          median_income_12_mo = "B06011_001",
-          indv_income_grp_10k_less = "B06010_004",
-          indv_income_grp_10_14 = "B06010_005",
-          indv_income_grp_15_24 = "B06010_006",
-          indv_income_grp_25_34 = "B06010_007",
-          indv_income_grp_35_49 = "B06010_008",
-          indv_income_grp_50_64 = "B06010_009",
-          indv_income_grp_65_74 = "B06010_010",
-          indv_income_grp_75_plus = "B06010_011")
+          median_income_12_mo = "B06011_001"
+)
 
 years <- 2020:2023 #pulls American Community Survey data from 2019 - 2021
 names(years) <- years
@@ -158,28 +103,6 @@ vars_county <- vars_county %>%
   pivot_wider(id_cols = c("year", "GEOID"),
               names_from = c("variable"),
               values_from = "estimate")
-
-vars_county <- vars_county %>%
-  mutate(
-    male_under_18_age = rowSums(select(vars_county, 4:7), na.rm = TRUE),
-    male_18_34_age = rowSums(select(vars_county, 8:13), na.rm = TRUE),
-    male_35_54_age = rowSums(select(vars_county, 14:17), na.rm = TRUE),
-    male_55_64_age = rowSums(select(vars_county, 18:20), na.rm = TRUE),
-    male_65_74_age = rowSums(select(vars_county, 21:23), na.rm = TRUE),
-    male_75_plus_age = rowSums(select(vars_county, 24:26), na.rm = TRUE),
-    female_under_18_age = rowSums(select(vars_county, 27:30), na.rm = TRUE),
-    female_18_34_age = rowSums(select(vars_county, 31:36), na.rm = TRUE),
-    female_35_54_age = rowSums(select(vars_county, 37:40), na.rm = TRUE),
-    female_55_64_age = rowSums(select(vars_county, 41:43), na.rm = TRUE),
-    female_65_74_age = rowSums(select(vars_county, 44:46), na.rm = TRUE),
-    female_75_plus_age = rowSums(select(vars_county, 47:49), na.rm = TRUE),
-    all_under_18 = male_under_18_age + female_under_18_age,
-    all_18_34_age = male_35_54_age + female_18_34_age,
-    all_35_54_age = male_35_54_age + female_35_54_age,
-    all_55_64_age = male_55_64_age + female_55_64_age,
-    all_65_74_age = male_65_74_age + female_65_74_age,
-    all_75_plus_age = male_75_plus_age + female_75_plus_age
-  )
 
 
 #Total pop and geography
@@ -203,7 +126,7 @@ vars_county = merge(pop_county, vars_county, by = c("year", "GEOID"))
 
 #Percentages
 colnames(vars_county)
-percent_cols <- names(vars_county[, c(5:51, 55:67, 69:86)])
+percent_cols <- names(vars_county[, c(5, 7)])
 
 vars_county <- vars_county %>%
   mutate(across(all_of(percent_cols), ~ (. / total_pop) * 100, .names = "P_{.col}"))
@@ -213,7 +136,7 @@ vars_county_avg <- vars_county %>%
   summarise(across(where(is.numeric), ~mean(.x)))
 
 #Merge with death dataset
-rm(df_mort)
+
 df_mort <- merge(deaths_20_23, vars_county_avg, by = "GEOID")
 
 colnames(df_mort)
@@ -224,9 +147,22 @@ colnames(df_mort)
 
 ```{r}
 
+summary(is.na(df_mort)) #median income
+
+#Imputing NA median income
+
+summary(is.na(df_mort$median_income_12_mo))
+
+med_income_na <- filter(df_mort, is.na(df_mort$median_income_12_mo))
+#25-34 range
+
+df_mort$median_income_12_mo <- ifelse(is.na(df_mort$median_income_12_mo), 29500, df_mort$median_income_12_mo)
+
+
 #Strata: age, sex, income, race
 
 #Income
+
 
 df_mort <- df_mort %>%
   mutate(
@@ -236,11 +172,11 @@ df_mort <- df_mort %>%
     
     # Create categories based on IQR
     strata_income_cat = case_when(
-      median_income_12_mo < Q1 ~ "1_income",                # Below the first quartile
-      median_income_12_mo >= Q1 & median_income_12_mo < median(median_income_12_mo, na.rm = TRUE) ~ "2_income", # Between Q1 and Q3
-      median_income_12_mo >= median(median_income_12_mo, na.rm = TRUE) & median_income_12_mo <= Q3 ~ "3_income", # Between Q1 and Q3
-      median_income_12_mo > Q3 ~ "4_income",               # Above the third quartile
-      TRUE ~ "1_income"                   # NA values indicate low median individual income levels by bracket
+      median_income_12_mo < Q1 ~ "low median income",                # Below the first quartile
+      median_income_12_mo >= Q1 & median_income_12_mo < median(median_income_12_mo, na.rm = TRUE) ~ "med-low median income", # Between Q1 and Q3
+      median_income_12_mo >= median(median_income_12_mo, na.rm = TRUE) & median_income_12_mo <= Q3 ~ "med-high median income", # Between Q1 and Q3
+      median_income_12_mo > Q3 ~ "high median income",               # Above the third quartile
+      TRUE ~ "low median income"                   # NA values indicate low median individual income levels by bracket
     )
   )
 
@@ -248,7 +184,7 @@ table(df_mort$strata_income_cat)
 
 
 #Age
-
+summary(df_mort$median_age_total)
 hist(df_mort$median_age_total)
 
 df_mort <- df_mort %>%
@@ -279,37 +215,22 @@ table(df_mort$strata_sex_cat)
 
 df_mort$P_non_white_only_pop <- 100 - df_mort$P_county_white_pop
 
-summary(df_mort$P_non_white_only_pop)
+df_mort$strata_race_cat <- cut(df_mort$P_non_white_only_pop, breaks = quantile(df_mort$P_non_white_only_pop, probs = 0:2 / 2), include.lowest = TRUE, labels = c("below median", "above median"))
 
-df_mort <- df_mort %>%
-  mutate(
-    white_non_ratio = P_county_white_pop / ifelse(P_non_white_only_pop < 1, 1, P_non_white_only_pop)
-  )
+by(df_mort$P_non_white_only_pop, df_mort$strata_race_cat, summary)
 
-df_mort <- df_mort %>%
-  mutate(
-    # Calculate Q1, Q3, and IQR for 'value' (you can replace 'value' with any column)
-    Q1 = quantile(white_non_ratio, 0.25, na.rm = TRUE),
-    Q3 = quantile(white_non_ratio, 0.75, na.rm = TRUE),
-    
-    # Create categories based on IQR
-    strata_race_cat = case_when(
-      white_non_ratio < Q1 ~ "1_race",                # Even or lower white-to-non-white ratio
-      white_non_ratio >= Q1 & white_non_ratio <= Q3 ~ "2_race", # Between Q1 and Q3
-      white_non_ratio > Q3 ~ "3_race",               # Above the third quartile (white white pop)
-      TRUE ~ "Unknown"                   # In case there are NA values
-    )
-  )
-
-table(df_mort$strata_race_cat)
+ggplot(df_mort, aes(P_non_white_only_pop)) +
+  geom_histogram() +
+  facet_grid(df_mort$strata_race_cat)
 
 #Composite strata
 
-df_mort$strata <- as.factor(paste(df_mort$strata_sex_cat,
-                        df_mort$strata_age_cat,
-                        df_mort$strata_race_cat,
+df_mort$strata <- as.factor(paste(df_mort$strata_sex_cat, ",",
+                        df_mort$strata_age_cat, ",",
+                        df_mort$strata_race_cat, ",",
                         df_mort$strata_income_cat))
 
+length(unique(df_mort$strata)) #64
 
 ```
 
@@ -336,29 +257,46 @@ df_mort$covid_mortality_rate_100k <- (df_mort$deaths_imputed / df_mort$Populatio
 summary(df_mort$covid_mortality_rate_100k) #Almost normally distributed
 boxplot(df_mort$covid_mortality_rate_100k)
 
-df_max <- filter(df_mort,covid_mortality_rate_100k > 900 )
+#Separating county and state
+df_mort <- separate_wider_delim(df_mort, cols = `Residence County`, delim = ",", names = c("County", "State"))
 
-#Outliers 99%
+
+#df_max <- filter(df_mort,covid_mortality_rate_100k > 900 )
+
+save(df_mort, file = "/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort.rda")
+
+load("/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort.rda")
+
+#Outliers 95%
 
 outliers <- as.data.frame(check_outliers(df_mort$covid_mortality_rate_100k))
 
-df_mort_99 <- df_mort[!outliers$Outlier, ]
+df_mort_95 <- df_mort[!outliers$Outlier, ]
 
-hist(df_mort_99$covid_mortality_rate_100k) # ostensibly normally distributed
+hist(df_mort_95$covid_mortality_rate_100k) # ostensibly normally distributed
 
-#Save df_mort_99
+#As factors
 
-save(df_mort_99, file = "/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort_99.rda")
+df_mort_95$strata_age_cat <- as.factor(df_mort_95$strata_age_cat)
+df_mort_95$strata_income_cat <- as.factor(df_mort_95$strata_income_cat)
+df_mort_95$strata_sex_cat <- as.factor(df_mort_95$strata_sex_cat)
+df_mort_95$strata_race_cat <- as.factor(df_mort_95$strata_race_cat)
 
+#Save df_mort_95
+
+save(df_mort_95, file = "/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort_95.rda")
+
+
+write_csv(df_mort_95, file = "/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort_95.csv")
 ```
 
 
 ```{r}
 
-load("/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort_99.rda")
+load("/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/MAIHDA_Methods_MS/03_Code/MAIHDA_Methods/df_mort_95.rda")
 #Checking cell counts of strata is sufficient for analysis
 
-strata_df <- df_mort_99 %>%
+strata_df <- df_mort_95 %>%
   group_by(strata) %>%
   mutate(strataN = n())
 
@@ -366,9 +304,9 @@ total_rows <- length(strata_df$strataN)
 rows_with_20_or_more <- sum(strata_df$strataN >= 20) 
 percentage <- (rows_with_20_or_more / total_rows) * 100
 
-print(percentage) #92%
+print(percentage) #95
 
-strata_sum <- df_mort_99 %>%
+strata_sum <- df_mort_95 %>%
   group_by(strata) %>%
   summarise(across(where(is.numeric), ~ mean(., na.rm = TRUE)))
 
@@ -376,81 +314,551 @@ ggplot(strata_df, aes(reorder(strata, covid_mortality_rate_100k, FUN = median), 
   geom_boxplot() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
+ggplot(strata_df, aes(reorder(strata, strataN, FUN = median)))+
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  xlab("Strata")
+
+#Descriptive statistics
+
+colnames(df_mort_95)
+
+table1 <- df_mort_95 %>% dplyr::select(c("covid_mortality_rate_100k", "median_income_12_mo", "median_age_total", "P_county_male_pop", "P_non_white_only_pop"))
+
+Desc(table1)
+
+#Graphs of within-group variance
+
+ggplot(df_mort_95, aes(strata_sex_cat, P_county_male_pop))+
+  geom_boxplot()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+regression_table2b <- df_mort_95 %>% dplyr::select(c("strata_age_cat",  "strata_race_cat", "strata_sex_cat", "strata_income_cat", "median_income_12_mo", "median_age_total", "P_county_male_pop", "P_non_white_only_pop"))
+
 
 ```
+
 #Model selection    
 
 ```{r}
 
-lmer1 <- lmer(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_99)
+lmer1 <- lmer(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_95)
 summary(lmer1)
 check_model(lmer1)
+AIC(lmer1) #30847.34
 
-glmm1 <- glmmTMB(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_99, family = "gaussian")
+glmm1 <- glmmTMB(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_95, family = "gaussian")
 summary(glmm1)
 check_model(glmm1)
+AIC(glmm1) #30851.03
 
-brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_99, family = "gaussian")
+brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_95, family = "gaussian")
 summary(brms1)
 check_model(brms1)
-loo(brms1)
+loo(brms1) #looic 30694.8
 
 
-compare_performance(lmer1, glmm1, rank = TRUE) #glmm1 is preferred
+compare_performance(lmer1, glmm1, rank = TRUE) #glmm1 is preferred, but LMER is similar. LMER for manuscript
 
 ```
-#Going to try with GLMM
+
+
+
+#GLMM (for manuscript)
 
 ```{r}
-colnames(df_mort_99)
 #Unadjusted
 
-glmm1 <- glmmTMB(covid_mortality_rate_100k ~ 1 + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_99, family = "gaussian")
+glmm1 <- glmmTMB(covid_mortality_rate_100k ~ 1 + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
 summary(glmm1)
-AIC(glmm1) #30833.53
-icc(glmm1)$ICC_adjusted #0.33
+confint(glmm1)
+AIC(glmm1) #30735.53
+icc(glmm1)$ICC_adjusted #0.3333385
 check_model(glmm1)
 
+537.2 / (537.2 + 1074.3) #0.333354
+
+plot(ggpredict(glmm1, terms = c("strata_age_cat", "strata_race_cat", "strata_sex_cat",  "strata_income_cat"),
+               type = "random"))
 
 #Adjusted with continuous strata
 
-glmm2 <- glmmTMB(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(white_non_ratio) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata:strata_race_cat), df_mort_99, family = "gaussian")
+glmm2 <- glmmTMB(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
 summary(glmm2)
-AIC(glmm2) #30586.19
-icc(glmm2)$ICC_adjusted #0.33
+confint(glmm2)
+AIC(glmm2) #30535.35
+icc(glmm2)$ICC_adjusted #0.1199105
 check_model(glmm2)
 
+140.2 / (140.2 + 1029.2) #0.1198905
 
 #Adjusted with categorical strata
 
-glmm3 <- glmmTMB(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_99, family = "gaussian")
+glmm3 <- glmmTMB(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
 summary(glmm3)
-AIC(glmm3) #30670.15
-icc(glmm3)$ICC_adjusted #0.33
+confint(glmm3)
+AIC(glmm3) #30623.46
+icc(glmm3)$ICC_adjusted #0.03507287
 check_model(glmm3)
+
+39.15 / (39.15 + 1077.10 ) * 100 #3.507279
+
+#K-fold cross validation using MAE
+
+model_formula <- covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat)
+
+# k-fold function
+k_fold_cv_glmmTMB <- function(data, k = 20, formula) {
+  
+  # Vector to store RMSE or other metrics for each fold
+  rmse_values <- numeric(k)
+  
+  # Randomly split data into k folds
+  set.seed(42)  # For reproducibility
+  folds <- sample(1:k, nrow(data), replace = TRUE)
+  
+  # Loop through each fold
+  for (i in 1:k) {
+    
+    # Create training and test sets based on the fold
+    test_indices <- which(folds == i)
+    train_indices <- setdiff(1:nrow(data), test_indices)
+    
+    # Create training and test datasets
+    train_data <- data[train_indices, ]
+    test_data <- data[test_indices, ]
+    
+    # Fit the model using glmmTMB on the training data
+    model <- glmmTMB(formula, data = train_data)
+    
+    # Predict on the test set
+    predictions <- predict(model, newdata = test_data, type = "response")
+    
+    # Calculate MAE for the test set
+     rmse_values[i] <- sqrt(mean((predictions - test_data$covid_mortality_rate_100k)^2))
+  }
+  
+  # Return the average MAE across all folds
+  mean_rmse <- mean(rmse_values)
+  return(mean_rmse)
+}
+
+
+# Run 10-fold cross-validation for the multilevel model
+cv_result <- k_fold_cv_glmmTMB(df_mort_95, k = 20, formula = model_formula)
+
+# View the average RMSE result
+print(cv_result) #33
+
+#Single-line model
+
+glmm4 <- glmmTMB(covid_mortality_rate_100k ~ strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat, df_mort_95, family = "gaussian")
+summary(glmm4)
+AIC(glmm4) #30597
+check_model(glmm4)
+performance::r2(glmm4) #.352
+confint(glmm4)
+
+compare_performance(glmm1, glmm2, glmm3, glmm4)
+anova(glmm1, glmm2, glmm3, glmm4)
+
+#Sensitivity analysis Model 5
+
+glmm5 <- glmmTMB(covid_mortality_rate_100k ~ standardise(median_age_total)*standardise(median_income_12_mo)*standardise(P_county_male_pop)*standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
+summary(glmm5)
+AIC(glmm5) #30503.24
+confint(glmm5)
+check_model(glmm5)
+
+#K-fold cross validation using MAE
+
+model_formula <- covid_mortality_rate_100k ~ standardise(median_age_total)*standardise(median_income_12_mo)*standardise(P_county_male_pop)*standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat)
+
+# k-fold function
+k_fold_cv_glmmTMB <- function(data, k = 20, formula) {
+  
+  # Vector to store RMSE or other metrics for each fold
+  rmse_values <- numeric(k)
+  
+  # Randomly split data into k folds
+  set.seed(42)  # For reproducibility
+  folds <- sample(1:k, nrow(data), replace = TRUE)
+  
+  # Loop through each fold
+  for (i in 1:k) {
+    
+    # Create training and test sets based on the fold
+    test_indices <- which(folds == i)
+    train_indices <- setdiff(1:nrow(data), test_indices)
+    
+    # Create training and test datasets
+    train_data <- data[train_indices, ]
+    test_data <- data[test_indices, ]
+    
+    # Fit the model using glmmTMB on the training data
+    model <- glmmTMB(formula, data = train_data)
+    
+    # Predict on the test set
+    predictions <- predict(model, newdata = test_data, type = "response")
+    
+    # Calculate MAE for the test set
+    rmse_values[i] <- sqrt(mean((predictions - test_data$covid_mortality_rate_100k)^2))
+  }
+  
+  # Return the average MAE across all folds
+  mean_rmse <- mean(rmse_values)
+  return(mean_rmse)
+}
+
+
+# Run 10-fold cross-validation for the multilevel model
+cv_result <- k_fold_cv_glmmTMB(df_mort_95, k = 20, formula = model_formula)
+
+# View the average RMSE result
+print(cv_result) #32.5
+
+127 / (127 + 1013) #0.1114035
+
+anova(glmm2, glmm4, glmm5)
+
+compare_performance(glmm1, glmm2, glmm3, glmm4, glmm5)
+```
+
+
+#MAE 
+
+```{r}
+#Predictions and MAE, boostrapping 95% CI
+
+predictions1 <- predict(glmm1, newdata = df_mort_95)
+predictions2 <- predict(glmm2, newdata = df_mort_95)
+predictions3 <- predict(glmm3, newdata = df_mort_95)
+predictions4 <- predict(glmm4, newdata = df_mort_95)
+predictions5 <- predict(glmm5, newdata = df_mort_95)
+
+actual_values <- df_mort_95$covid_mortality_rate_100k
+
+mae1 <- mean(abs(actual_values - predictions1))
+mae2 <- mean(abs(actual_values - predictions2))
+mae3 <- mean(abs(actual_values - predictions3))
+mae4 <- mean(abs(actual_values - predictions4))
+mae5 <- mean(abs(actual_values - predictions5))
+
+# Example Data
+# Assuming df_mort_95 is your dataset and glmm1, glmm2, glmm3, glmm4 are your models
+
+# Fit your models (assuming these are already fitted)
+# glmm1 <- glmer(..., data = df_mort_95)
+# glmm2 <- glmer(..., data = df_mort_95)
+# glmm3 <- glmer(..., data = df_mort_95)
+# glmm4 <- glmer(..., data = df_mort_95)
+
+# Function to calculate MAE for a bootstrap sample
+calculate_mae <- function(data, model) {
+  # Resample the data with replacement
+  bootstrap_sample <- data[sample(nrow(data), replace = TRUE), ]
+  
+  # Generate predictions for the bootstrap sample
+  bootstrap_predictions <- predict(model, newdata = bootstrap_sample, re.form = NULL)
+  
+  # Calculate and return the MAE for the bootstrap sample
+  mae <- mean(abs(bootstrap_sample$covid_mortality_rate_100k - bootstrap_predictions))  # Replace 'Y' with the actual dependent variable name
+  return(mae)
+}
+
+# Number of bootstrap samples (e.g., 1000 iterations)
+n_bootstrap <- 1000
+
+# Function to calculate CI for MAE of a model
+calculate_ci_for_mae <- function(model, data, n_bootstrap = 1000) {
+  mae_values <- numeric(n_bootstrap)
+  
+  # Perform bootstrap resampling and calculate MAE for each sample
+  for (i in 1:n_bootstrap) {
+    mae_values[i] <- calculate_mae(data, model)
+  }
+  
+  # Calculate the 95% confidence interval for MAE
+  ci_lower <- quantile(mae_values, 0.025)
+  ci_upper <- quantile(mae_values, 0.975)
+  
+  return(c(ci_lower, ci_upper))
+}
+
+# Calculate confidence intervals for each model
+ci_glmm1 <- calculate_ci_for_mae(glmm1, df_mort_95, n_bootstrap)
+ci_glmm2 <- calculate_ci_for_mae(glmm2, df_mort_95, n_bootstrap)
+ci_glmm3 <- calculate_ci_for_mae(glmm3, df_mort_95, n_bootstrap)
+ci_glmm4 <- calculate_ci_for_mae(glmm4, df_mort_95, n_bootstrap)
+ci_glmm5 <- calculate_ci_for_mae(glmm5, df_mort_95, n_bootstrap)
+
+# Print the confidence intervals for each model
+cat("95% CI for MAE (GLMM 1): [", ci_glmm1[1], ", ", mae1, ", ", ci_glmm1[2], "]\n")
+cat("95% CI for MAE (GLMM 2): [", ci_glmm2[1], ", ", mae2, ", ", ci_glmm2[2], "]\n")
+cat("95% CI for MAE (GLMM 3): [", ci_glmm3[1], ", ", mae3, ", ", ci_glmm3[2], "]\n")
+cat("95% CI for MAE (GLMM 4): [", ci_glmm4[1], ", ", mae4, ", ", ci_glmm4[2], "]\n")
+cat("95% CI for MAE (GLMM 4): [", ci_glmm5[1], ", ", mae5, ", ", ci_glmm5[2], "]\n")
+AIC(glmm1)
+AIC(glmm2)
+AIC(glmm3)
+AIC(glmm4)
+
+simulationOutput <- simulateResiduals(fittedModel = glmm5, plot = F)
+plot(simulationOutput)
+
+```
+
+#For exporting images
+
+plot(ggpredict(glmm1, terms = c("strata_age_cat", "strata_race_cat", "strata_sex_cat",  "strata_income_cat"),
+               type = "random"))
+
+plot(ggpredict(glmm2, terms = c("strata_age_cat", "strata_race_cat", "strata_sex_cat",  "strata_income_cat"),
+               type = "random"))
+
+plot(ggpredict(glmm3, terms = c("strata_age_cat", "strata_race_cat", "strata_sex_cat",  "strata_income_cat"),
+               type = "random"))
+
+plot(ggpredict(glmm4, terms = c("strata_age_cat", "strata_race_cat", "strata_sex_cat",  "strata_income_cat"),
+               type = "fixed"))
+
+plot(ggpredict(glmm_test, terms = c("strata_age_cat", "strata_race_cat", "strata_sex_cat",  "strata_income_cat"),
+               type = "random"))
+
+
+#Predictions by strata for each model
+
+```{r}
+
+models <- list(glmm1, glmm2, glmm3, glmm4, glmm5)
+
+# Define strata of interest (example: subset based on a certain variable, e.g., "group")
+strata_data1 <- subset(df_mort_95, strata == "Maj_Male , 1_age , below median , low median income")
+strata_data1$strata <- "Majority Male, Q1 median age, below median %ile non-white population, Q1 median income (n = 11)"
+strata_data2 <- subset(df_mort_95, strata == "Maj_Male , 4_age , above median , high median income")
+strata_data2$strata <- "Majority Male, Q4 median age, above median %ile non-white population, Q4 median income (n = 12)"
+strata_data3 <- subset(df_mort_95, strata == "Maj_Female , 2_age , above median , high median income")
+strata_data3$strata <- "Majority Female, Q2 median age, above median %ile non-white population, Q4 median income (n = 107)"
+strata_data4 <- subset(df_mort_95, strata == "Maj_Male , 3_age , below median , med-high median income")
+strata_data4$strata <- "Majority Male, Q3 median age, below median %ile non-white population, Q3 median income (n = 100)"
+
+strata_data <- rbind(strata_data1, strata_data2, strata_data3, strata_data4)
+
+# Create a function to extract predicted values for a specific strata
+get_predictions <- function(model, newdata) {
+  predict(model, newdata = newdata, type = "response", re.form = NA)  # or use re.form = NULL depending on random effects
+}
+
+# Extract predictions for each model and strata
+predictions_list <- lapply(models, get_predictions, newdata = strata_data)
+
+# Combine predictions into a single data frame for comparison
+predictions_df <- data.frame(strata_data, do.call(cbind, predictions_list))
+
+# Rename the columns for clarity
+colnames(predictions_df)[(ncol(strata_data)+1):ncol(predictions_df)] <- paste("Model", 1:5)
+
+
+# View the resulting dataframe with predictions for each model
+head(predictions_df)
+
+predictions_long <- predictions_df %>%
+  gather(key = "Model", value = "Predicted", `Model 1`:`Model 5`) %>%
+  select(strata, Predicted, covid_mortality_rate_100k, Model)
+
+real_data <- select(strata_data, covid_mortality_rate_100k)
+real_data$Model <- "Observed"
+real_data$strata <- strata_data$strata
+real_data$Predicted <- real_data$covid_mortality_rate_100k
+
+predictions_long <- rbind(predictions_long, real_data) 
+
+by(predictions_long$Predicted, predictions_long$Model, summary)
+
+#mean values
+
+mean_values <- predictions_long %>%
+  group_by(Model, strata) %>%
+  summarise(Mean_Pred = mean(Predicted, na.rm = TRUE))
+
+mean_observed <- predictions_long %>%
+  filter(Model == "Observed") %>%
+  summarise(Mean_Pred = mean(Predicted, na.rm = TRUE))
+
+
+observed_means <- predictions_long %>%
+  filter(Model == "Observed") %>%
+  group_by(strata) %>%
+  summarise(Observed_Mean = mean(Predicted, na.rm = TRUE))
+
+
+global_mean <- mean(df_mort_95$covid_mortality_rate_100k)
+
+ggplot(predictions_long, aes(x = Model, y = Predicted, group = Model, color = Model)) +
+  geom_boxplot() +
+  stat_summary(fun.y = mean, geom = "point", shape = 20, size = 2, color = "black", fill = "black") +
+  labs(
+    title = "Figure 1: Comparison across models for strata of low and high membership",
+    subtitle = "With global mean (dotted line) and strata mean (solid line)",
+    x = "Models",
+    y = "Predicted Values"
+  ) +
+  theme_minimal() +
+  facet_wrap(~strata) +  # Facet by strata
+  # Add a horizontal line at the mean of "observed" for each strata
+  geom_hline(data = observed_means, aes(yintercept = Observed_Mean, color = "Observed Mean"),
+             linetype = "solid", size = 0.4, color = "black") +
+  geom_hline(aes(yintercept = global_mean), linetype = "dashed", size = 0.2, color = "black")
+
+
+```
+
+
+
+
+
+#MCMC
+
+```{r}
+?brms
+brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_95, family = "gaussian",
+                            warmup = 5000, iter = 10000, 
+                            chains = 1, seed = 195)
+summary(brms1)
+loo(brms1) #looic 30595.5
+mcmc_plot(brms1)
+icc(brms1) #0.352
+plot(brms1, variable = "^b", regex = TRUE)
+
+#VPC 
+ranef_var <- VarCorr(brms1)
+
+strata_sd <- ranef_var$strata[[1]]
+strata_var <- strata_sd^2
+
+residual_sd <- ranef_var$residual__[[1]]
+residual_var <- residual_sd^2
+
+vpc_strata <- strata_var / (strata_var + residual_var)
+vpc_strata #0.3455358 (0.2791841, 0.4141902)
+
+#Model 2
+
+brms2 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
+summary(brms2)
+loo(brms2) #looic 30463.3
+mcmc_plot(brms2)
+icc(brms2) #0.134
+
+#VPC 
+ranef_var <- VarCorr(brms2)
+
+strata_sd <- ranef_var$strata[[1]]
+strata_var <- strata_sd^2
+
+residual_sd <- ranef_var$residual__[[1]]
+residual_var <- residual_sd^2
+
+vpc_strata <- strata_var / (strata_var + residual_var)
+vpc_strata #0.1300675 (0.08964915, 0.1821352)
+
+#PCV
+
+0.1197096 / 0.3472363 #0.3447497
+
+conditional_effects(brms2)
+loo(brms2) #looic 30479.8
+pp_check(brms2)
+
+
+#Model 3 traditional MAIHDA
+
+brms3 <- brm(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
+summary(brms3)
+conditional_effects(brms3)
+loo(brms3) #looic 30587.2
+pp_check(brms3)
+
+#VPC 
+ranef_var <- VarCorr(brms3)
+
+strata_sd <- ranef_var$strata[[1]]
+strata_var <- strata_sd^2
+
+residual_sd <- ranef_var$residual__[[1]]
+residual_var <- residual_sd^2
+
+vpc_strata <- strata_var / (strata_var + residual_var)
+vpc_strata #0.04939537 (0.02700924, 0.0810209)
+
+#PCV
+
+0.04939537 / 0.3455358 #0.142953
+
+
+#model 4
+
+brms4 <- brm(covid_mortality_rate_100k ~ strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat, df_mort_95, family = "gaussian")
+summary(brms4)
+
+
+#model 5
+
+brms5 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total)*standardise(median_income_12_mo)*standardise(P_county_male_pop)*standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
+summary(brms5)
+plot(brms5)
+conditional_effects(brms5)
+loo(brms2) #looic 30479.8
+pp_check(brms2)
+
+#VPC 
+ranef_var <- VarCorr(brms5)
+
+strata_sd <- ranef_var$strata[[1]]
+strata_var <- strata_sd^2
+
+residual_sd <- ranef_var$residual__[[1]]
+residual_var <- residual_sd^2
+
+vpc_strata <- strata_var / (strata_var + residual_var)
+vpc_strata #0.1212295. (0.08, 0.18)
+
+
+#comparison
+
+loo(brms1, brms2, brms3, brms5)
 
 ```
 
 #Bayesian
 
 ```{r}
-brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_99, family = "gaussian")
+brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
 summary(brms1)
 check_model(brms1)
 loo(brms1) #looic 30676
 
 
-brms2 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(white_non_ratio) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_99, family = "gaussian")
+brms2 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
 summary(brms2)
 plot(brms2)
 
 
-brms3 <- brm(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_99, family = "gaussian")
-summary(brms2)
-
+brms3 <- brm(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
+summary(brms3)
 
 
 loo(brms1, brms3)
 
+brms4 <- brm(covid_mortality_rate_100k ~ strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat, df_mort_95, family = "gaussian")
+summary(brms4)
+
+
+brms5 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total)*standardise(median_income_12_mo)*standardise(P_county_male_pop)*standardise(white_non_ratio) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
+summary(brms5)
+plot(brms5)
+
+
 ```
+
 
