@@ -247,7 +247,7 @@ summary(df_mort$Population)
 
 #Imputing suppressed deaths
 df_mort <- df_mort %>%
-  mutate(deaths_imputed = ifelse(is.na(covid_deaths), sample(1:4, sum(is.na(covid_deaths)), replace = TRUE), covid_deaths))
+  mutate(deaths_imputed = ifelse(is.na(covid_deaths), sample(1:9, sum(is.na(covid_deaths)), replace = TRUE), covid_deaths))
 
 summary(df_mort$deaths_imputed)
 
