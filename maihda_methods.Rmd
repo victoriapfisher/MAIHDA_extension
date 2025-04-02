@@ -1,7 +1,7 @@
 ---
-title: "MAIHDA_population_level"
+title: "Code for MAIHDA extension paper (under review SSM)"
 author: "Victoria Fisher"
-date: "2025-01-17"
+date: "2025-02-26"
 output: html_document
 ---
 
@@ -15,33 +15,31 @@ library(pacman)
 
 p_load(tidyverse,
        tidycensus,
+       tigris,
        ggplot2,
        gtsummary,
        DescTools,
        datawizard,
-       excessmort,
        lubridate,
        readxl,
        haven,
        MASS,
        lme4,
-       lmerTest,
        nlme,
        glmmTMB,
-       brms,
        merTools,
        bbmle,
        zctaCrosswalk,
        performance,
-       purrr,
        ggpubr,
        foreign,
        DHARMa,
        sf,
+       spdep,
+       tmap,
        rms,
        mlogit,
        effects,
-       splines,
        car,
        Publish,
        msme,
@@ -54,92 +52,646 @@ p_load(tidyverse,
        clusterSim,
        geepack,
        geeM,
-       cardx,
-       insight,
-       parameters,
+       tidybayes,
+       data.table,
+       MCMCglmm,
+       emmeans,
+       brms,
        ggeffects,
-       emmeans)
-
-options(tigris_use_cache = FALSE)
-
+       parameters,
+       insight,
+       FactoMineR,
+       factoextra,
+       MCMCglmm,
+       coda,
+       brms,
+       lattice,
+       loo,
+       Metrics,
+       merTools,
+       labelled,
+       statmod,
+       SpatialEpi,
+       spatialreg,
+       spBayes,
+       minerva,
+       nortest,
+       classInt,
+       psych,
+       nFactors,
+       ggfortify)
 ```
 
-#Loading datasets
+
 
 ```{r}
+#import CDC wonder data
 
-#Covid mortality
+library(readr)
 
-deaths_20_23 <- read_delim('COVID Mortality Statistics 2020 through 2023.txt', 
+deaths_mar20_21 <- read_delim("~/Downloads/Provisional Mortality Statistics, 2018 through Last Week.txt", 
     delim = "\t", escape_double = FALSE, 
     col_types = cols(Notes = col_skip()), 
     trim_ws = TRUE)
 
-colnames(deaths_20_23)[2] <- "GEOID"
-#problems(deaths_20_23)
+deaths_apr21_22 <- read_delim("~/Downloads/Provisional Mortality Statistics, 2018 through Last Week (3).txt", 
+    delim = "\t", escape_double = FALSE, 
+    col_types = cols(Notes = col_skip()), 
+    trim_ws = TRUE)
 
-#ACS
+#Zip to County crosswalk
+#2019
+ZIP_COUNTY19 <- read_xlsx("~/Downloads/ZIP_COUNTY_122019.xlsx")
+
+#2020 
+ZIP_COUNTY20 <- read_xlsx("~/Downloads/ZIP_COUNTY_122020.xlsx")
+colnames(ZIP_COUNTY20)[1] <- "ZCTA20"
+
+
+#SDOH Datasets
+
+
+## sociodemo 2020 requires mulitplying by total pop to get counts
+load("/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/38528-0005-Data.rda")
+
+sociodemo <- da38528.0005
+
+sociodemo_cnty <- merge(ZIP_COUNTY20, sociodemo, by = "ZCTA20")
+colnames(sociodemo_cnty)
+sociodemo_cnty <- sociodemo_cnty %>%
+  mutate(across(c(10:38), ~ . * sociodemo_cnty$TOTPOP20, .names = "count_{.col}"))
+
+sociodemo_cnty <- sociodemo_cnty %>% dplyr::select(!c(3:6))
+
+sociodemo_cnty <- sociodemo_cnty %>%
+  group_by(COUNTY) %>%
+  summarise(
+    across(starts_with(c("count_", "TOTPOP")), sum, na.rm = TRUE),
+    across(starts_with("MED"), mean, na.rm = TRUE)
+    )
+
+
+## education 2020
+
+edu <- read_xlsx('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/03_Code/national_place_mortality/EDGE_GEOCODE_PUBLICSCH_2021.xlsx')
+
+edu$school_count <- "1"
+
+edu$school_count <- as.numeric(edu$school_count)
+
+edu_cnty <- edu %>%
+  group_by(CNTY, SCHOOLYEAR) %>%
+  summarise_at(vars(school_count), ~ sum(., na.rm = TRUE))
+
+## pollution zcta 2020
+
+load('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/TRACT20_ZCTA20_pollutingsites8721.rda')
+pollution <- da38597.0004
+
+pollution_cnty <- merge(ZIP_COUNTY20, pollution, by = "ZCTA20")
+
+pollution_cnty <- pollution_cnty %>%
+  group_by(COUNTY, YEAR) %>%
+  summarise_at(vars(COUNT_TRI_FACILITIES), ~sum(., na.rm = TRUE))
+
+pollution_cnty <- filter(pollution_cnty, YEAR >= 2019)
+
+## parks zcta 2020
+
+load('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/TRACT20_ZCTA20_parks_nanda1822.rda')
+
+parks <- da38586.0004
+
+parks_cnty <- merge(ZIP_COUNTY20, parks, by = "ZCTA20")
+
+parks_cnty <- parks_cnty %>%
+  group_by(COUNTY) %>%
+  summarise(across(where(is.numeric), ~sum(., na.rm = TRUE)))
+
+parks_cnty <- parks_cnty %>% dplyr::select(!c(2:5))
+
+## ACS demographics 2020
+
+load('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/acs_zcta_18_21.rda')
+
+acs_zcta_18_21 <- filter(acs_zcta_18_21, year >= 2020)
+
+acs_zcta_18_21_cnty <- merge(ZIP_COUNTY20, acs_zcta_18_21, by.x = "ZCTA20", by.y = "ZCTA")
+
+colnames(acs_zcta_18_21_cnty)
+#this needs to be filtered by sum and avg
+acs_zcta_18_21_cnty <- acs_zcta_18_21_cnty %>%
+  group_by(COUNTY, year) %>%
+  summarise(
+    across(c(total_pop, aggregate_car_commute, commute_alone_car, owner_occ), sum, na.rm = TRUE),
+    across(c(med_age, household_size_vehicles_avail, avg_hh, avg_hh_renter_occ, med_household_value), mean, na.rm = TRUE)
+    )
+
+
+## civic social 2021, ZCTA 2020
+
+civ_soc <- read_csv('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/ZCTA20_civis_soc_rel_nanda_1990-2021_01P.csv')
+
+civ_soc <- filter(civ_soc, year >= 2020)
+
+civ_soc <- civ_soc %>% dplyr::select(c(1:2, starts_with("count_")))
+
+civ_soc_cnty <- merge(ZIP_COUNTY20, civ_soc, by.x = "ZCTA20", by.y = "zcta20")
+
+civ_soc_cnty <- civ_soc_cnty %>%
+  group_by(COUNTY, year) %>%
+  summarise(across(where(is.numeric), ~sum(., na.rm = TRUE)))
+
+## services 2021, zcta 2020
+
+services <- read_csv('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/ZCTA20_services_nanda_1990-2021_01P.csv')
+
+services <- filter(services, year >= 2020)
+
+services <- services %>% dplyr::select(c(1:2, starts_with("count_")))
+
+services_cnty <- merge(ZIP_COUNTY20, services, by.x = "ZCTA20", by.y = "zcta20")
+
+services_cnty <- services_cnty %>%
+  group_by(COUNTY, year) %>%
+  summarise(across(where(is.numeric), ~sum(., na.rm = TRUE)))
+
+services_cnty <- services_cnty %>% dplyr::select(!c(3:6))
+
+## liquor tobacco 2019
+
+liqtob <- read_csv('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/nanda_lqtbcon_zcta_2003-2017_01P.csv')
+
+liqtob <- liqtob %>% dplyr::select(c(1:2, starts_with("count_4")))
+
+names(liqtob)[3:10] <- c("n_liquor_stores03_17", "n_tobacco03_17", "n_conv_store03_17", "n_gas_w_conv03_17")
+
+liqtob_cnty <- merge(ZIP_COUNTY19, liqtob, by.x = "ZIP", by.y = "zcta19")
+
+liqtob_cnty <- liqtob_cnty %>%
+  group_by(COUNTY, year) %>%
+  summarise(across(where(is.numeric), ~sum(., na.rm = TRUE)))
+
+liqtob_cnty <- filter(liqtob_cnty, year == 2017)
+
+liqtob_cnty <- liqtob_cnty %>% dplyr::select(!c(2:6))
+
+## groery 2019
+grocery <- read_csv("/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/nanda_grocery_zcta_2003-2017_01P.csv")
+
+grocery <- grocery %>% dplyr::select(c(1:2, starts_with("count_4")))
+
+names(grocery)[3:5] <- c("n_grocery_17", "n_specialty_food_17", "n_wholesale_17")
+
+grocery_cnty <- merge(ZIP_COUNTY19, grocery, by.x = "ZIP", by.y = "zcta19")
+
+grocery_cnty <- grocery_cnty %>%
+  group_by(COUNTY, year) %>%
+  summarise(across(where(is.numeric), ~sum(., na.rm = TRUE)))
+
+grocery_cnty <- filter(grocery_cnty, year == 2017)
+
+grocery_cnty <- grocery_cnty %>% dplyr::select(!"year")
+
+## law enforcement 2019
+
+law <- read_csv('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/nanda_lawenf_zcta_2003-2017_01P.csv')
+
+law <- law %>% dplyr::select(c(1:2, starts_with("count_9")))
+
+names(law)[3:9] <- c("n_all_law_orgs03_17", "n_courts03_17", "n_police_dept03_17", "n_lawyers03_17", "n_prisons_jails03_17", "nfire_dept03_17", "n_other_law03_17")
+
+law_cnty <- merge(ZIP_COUNTY19, law, by.x = "ZIP", by.y = "zcta19")
+
+law_cnty <- law_cnty %>%
+  group_by(COUNTY, year) %>%
+  summarise(across(where(is.numeric), ~sum(., na.rm = TRUE)))
+
+law_cnty <- filter(law_cnty, year == 2017)
+
+law_cnty <- law_cnty %>% dplyr::select(!c(2:6))
+
+## transit 2019 ZCTA file
+load('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/ZCTA20_transit_nanda1618.rda')
+
+transit <- da38605.0002
+
+transit_cnty <- merge(ZIP_COUNTY19, transit, by.x = "ZIP", by.y = "ZCTA19")
+
+transit_cnty <- transit_cnty %>%
+  group_by(COUNTY) %>%
+  summarise_at(vars(COUNT_NTM_STOPS), ~sum(., na.rm = TRUE))
+
+## healthcare 2019
+
+healthcare <- read_sas('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/ZCTA20_hlthcr_nanda_0317Z_03P.sas7bdat')
+
+healthcare <- healthcare %>% dplyr::select(c(1:2, starts_with("count_6"), 239))
+
+colnames(healthcare)
+
+healthcare <- healthcare %>% dplyr::select(!c(3:13, 19:21))
+
+names(healthcare)[3:15] <- c("n_outpatient_ctr_17", "n_diag_labs_17", "n_home_hlth_serv_17", "n_other_ambulatory_17", "n_all_hospitals_17", "n_all_nursing_care_facilities_17", "n_skilled_nursing_hospice_facilities_17", "n_residential_disab_care_17", "n_inpatient_disab_17", "n_mental_health_absue_car_facil_17", "n_continuing_care_grp_homes_17", "n_other_residential_care_17", "n_pharmacies_17")
+
+
+healthcare_cnty <- merge(ZIP_COUNTY19, healthcare, by.x = "ZIP", by.y = "zcta19")
+
+healthcare_cnty <- healthcare_cnty %>%
+  group_by(COUNTY, year) %>%
+  summarise(across(where(is.numeric), ~sum(., na.rm = TRUE)))
+
+healthcare_cnty <- filter(healthcare_cnty, year == 2017)
+
+healthcare_cnty <- healthcare_cnty %>% dplyr::select(!c(2:6))
+
+## arts 2019
+load('/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/NaNDA/ZCTA/arts_entrmnt.rda')
+
+arts_entrmnt <- arts_entrmnt %>% dplyr::select(c(1:2, starts_with("count_7"), starts_with("count_5")))
+names(arts_entrmnt)[3:13] <- c("n_performing_arts03_17", "n_spectator_sports03_17", "n_museums03_17", "n_amusement_parks03_17", "n_gambling03_17", "n_casino_hotels03_17", "n_other_arts_entr03_17", "n_fitness_rec03_17", "n_golf03_17", "n_bowling03_17", "n_libraries03_17")
+
+arts_entrmnt_cnty <- merge(ZIP_COUNTY19, arts_entrmnt, by.x = "ZIP", by.y = "zcta19")
+
+arts_entrmnt_cnty <- arts_entrmnt_cnty %>%
+  group_by(COUNTY, year) %>%
+  summarise(across(where(is.numeric), ~sum(., na.rm = TRUE)))
+
+arts_entrmnt_cnty <- filter(arts_entrmnt_cnty, year == 2017)
+
+arts_entrmnt_cnty <- arts_entrmnt_cnty %>% dplyr::select(!"year")
+
+
+#Rural-Urban
+
+rural_urban <- read_xlsx("/Users/fisherv1/Downloads/2020_UA_COUNTY.xlsx")
+
+rural_urban$CountyFIPS <- paste0(rural_urban$STATE, rural_urban$COUNTY)
+
+summary(rural_urban$POPPCT_URB)
+
+rural_urban$rural_urb_pop_ratio <- rural_urban$POPPCT_RUR / rural_urban$POPPCT_URB
+
+rural_urban$rural_urb_pop_ratio <- ifelse(rural_urban$rural_urb_pop_ratio == Inf & rural_urban$POPPCT_RUR == 1, 100, ifelse(rural_urban$rural_urb_pop_ratio == Inf & rural_urban$POPPCT_URB == 1, 0, rural_urban$rural_urb_pop_ratio))
+
+rural_urban$rural_urb_area_ratio <- rural_urban$ALAND_PCT_RUR / rural_urban$ALAND_PCT_URB
+
+rural_urban$rural_urb_area_ratio <- ifelse(rural_urban$rural_urb_area_ratio == Inf & rural_urban$ALAND_PCT_RUR == 1, 100, ifelse(rural_urban$rural_urb_area_ratio == Inf & rural_urban$ALAND_PCT_URB == 1, 0, rural_urban$rural_urb_area_ratio))
+
+rural_urban <- rural_urban %>% mutate(
+  rural_pop_bin = case_when(
+    POPPCT_RUR > .5 ~ "Maj Rural",
+    POPPCT_RUR == .5 ~ "50/50 Rur-Urb",
+    POPPCT_RUR < 0.5 ~ "Maj Urban"
+  ),
+  rural_area_bin = case_when(
+    ALAND_PCT_RUR > .5 ~ "Maj Rural",
+    ALAND_PCT_RUR == .5 ~ "50/50 Rur-Urb",
+    ALAND_PCT_RUR < 0.5 ~ "Maj Urban"
+  )
+)
+
+
+#ACS shapefiles
 
 v2020 <- load_variables(2020, "acs5")
 
-vars <- c(county_male_pop = "B01001_002",
-          county_white_pop = "B02001_002",
-          median_age_total = "B01002_001",
-          median_income_12_mo = "B06011_001"
-)
-
-years <- 2020:2023 #pulls American Community Survey data from 2019 - 2021
+years <- 2020:2021 #pulls American Community Survey data from 2019 - 2021
 names(years) <- years
-vars_county <- purrr::map_dfr(years, ~{
+plumbing_county <- purrr::map_dfr(years, ~{
   get_acs(
     geography = "county", 
-    variables = vars, 
-    year = .x,
-    geometry = FALSE
-    ) 
-}, .id = "year")
-
-vars_county <- vars_county %>%
-  pivot_wider(id_cols = c("year", "GEOID"),
-              names_from = c("variable"),
-              values_from = "estimate")
-
-
-#Total pop and geography
-years <- 2020:2023 #pulls American Community Survey data from 2020 - 2023
-names(years) <- years
-pop_county <- purrr::map_dfr(years, ~{
-  get_acs(
-    geography = "county", 
-    variables = "B01001_001", 
+    variables = "B25048_003", 
     year = .x,
     geometry = TRUE
     ) 
-}, .id = "year") %>% tigris::shift_geometry()
+}, .id = "year") %>% shift_geometry()
 
-colnames(pop_county)[5] = "total_pop"
-pop_county <- pop_county %>% dplyr::select(!c(4,6))
+names(plumbing_county) <- c("year", "COUNTY", "NAME", "variable", "occ_house_incomplete_plumbing", "margin_of_error", "geometry")
 
-#Merge two datasets
+plumbing_county <- plumbing_county %>% dplyr::select(c("year", "COUNTY", "occ_house_incomplete_plumbing", "geometry"))
 
-vars_county = merge(pop_county, vars_county, by = c("year", "GEOID"))
 
-#Percentages
-colnames(vars_county)
-percent_cols <- names(vars_county[, c(5, 7)])
+```
 
-vars_county <- vars_county %>%
-  mutate(across(all_of(percent_cols), ~ (. / total_pop) * 100, .names = "P_{.col}"))
+#Merging coviariate datasets
 
-vars_county_avg <- vars_county %>%
-  group_by(GEOID) %>%
-  summarise(across(where(is.numeric), ~mean(.x)))
+```{r}
 
-#Merge with death dataset
+acs_civ_cnty <- merge(acs_zcta_18_21_cnty, civ_soc_cnty, by =  c("COUNTY", "year"))
 
-df_mort <- merge(deaths_20_23, vars_county_avg, by = "GEOID")
+arts_acs_cnty <- merge(acs_civ_cnty, arts_entrmnt_cnty, by = "COUNTY")
 
-colnames(df_mort)
+aac_edu <- merge(arts_acs_cnty, edu_cnty, by.x = "COUNTY", by.y = "CNTY")
+
+aace_groc <- merge(aac_edu, grocery_cnty, by = "COUNTY")
+
+aaceg_healthcare <- merge(aace_groc, healthcare_cnty, by = "COUNTY")
+
+aacegh_law <- merge(aaceg_healthcare, law_cnty, by = "COUNTY")
+
+aaceghl_liq <- merge(aacegh_law, liqtob_cnty, by = "COUNTY")
+
+aaceghll_parks <- merge(aaceghl_liq, parks_cnty, by = c("COUNTY"))
+
+aaceghllp_pollution <- merge(aaceghll_parks, pollution_cnty, by.x = c("COUNTY", "year"), by.y = c("COUNTY", "YEAR"))
+
+aaceghllpp_serv <- merge(aaceghllp_pollution, services_cnty, by = c("COUNTY", "year"))
+
+aaceghllpps_socio <- merge(aaceghllpp_serv, sociodemo_cnty, by = "COUNTY")
+
+aaceghllppss_rural <- merge(aaceghllpps_socio, rural_urban, by.x = "COUNTY", by.y = "CountyFIPS")
+
+cov_df <- merge(aaceghllppss_rural, transit_cnty, by = "COUNTY")
+
+cov_plumb <- merge(cov_df, plumbing_county, by = c("COUNTY", "year"))
+
+
+```
+
+
+#Creating density variables
+
+```{r}
+
+cov_plumb$med_household_value[is.na(cov_plumb$med_household_value)] <- mean(cov_plumb$med_household_value, na.rm = TRUE)
+
+summary(cov_plumb$med_household_value)
+
+#Creating summed domain variables
+
+#normalizing houses and transit stops
+
+cov_plumb$n_houses <- cov_plumb$total_pop / cov_plumb$avg_hh
+
+mean(cov_plumb$total_pop / cov_plumb$`ALAND_Mi²_COU`) #on average 400 people per sq mile. so could multiple by 1000 to get 1000 people per sq mile
+
+colnames(cov_plumb)
+
+cov_plumb <- cov_plumb %>%
+  mutate(across(c("n_all_hospitals_17", "count_childdaycareservices", "n_pharmacies_17", "n_all_nursing_care_facilities_17", "n_mental_health_absue_car_facil_17", "n_outpatient_ctr_17",  "n_grocery_17", "n_tobacco03_17", "n_conv_store03_17", "n_liquor_stores03_17", "n_gas_w_conv03_17", "n_specialty_food_17",  "n_libraries03_17", "n_museums03_17", "nfire_dept03_17", "n_police_dept03_17", "count_indivfamilyservices", "count_elderdisabservices", "count_childyouthservices", "count_emergencydisasterservices", "count_childdaycareservices", "count_substanceabusecounseling", "n_fitness_rec03_17", "count_religiousorgs", "count_youthorgs", "count_veteransorgs", "school_count", "COUNT_OPEN_PARKS", "COUNT_NTM_STOPS", "COUNT_TRI_FACILITIES"), ~ ((. / (cov_plumb$total_pop * cov_plumb$`ALAND_Mi²_COU`)) * 100000), .names = "dens_100k_{.col}"))
+
+colnames(cov_plumb)
+
+```
+
+
+#Years
+
+```{r}
+
+cov_2020 <- filter(cov_plumb, year == 2020)
+
+cov_2021 <- filter(cov_plumb, year == 2021)
+
+
+```
+
+
+
+#Merging with death datasets
+
+```{r}
+
+colnames(deaths_mar20_21)[2] <- "COUNTY"
+colnames(deaths_apr21_22)[2] <- "COUNTY"
+
+df_2020 <- merge(deaths_mar20_21, cov_2020, by = "COUNTY")
+
+df_2021 <- merge(deaths_apr21_22, cov_2021, by = "COUNTY")
+
+#Inducing NAs 
+
+df_2020$Deaths <- as.numeric(df_2020$Deaths)
+df_2021$Deaths <- as.numeric(df_2021$Deaths)
+
+summary(df_2020$Deaths)
+
+#Imputing suppressed data by generating random numbers 1 - 4
+
+df_2020 <- df_2020 %>%
+  mutate(deaths_imputed = ifelse(is.na(Deaths), sample(1:9, sum(is.na(Deaths)), replace = TRUE), Deaths))
+
+summary(df_2020$deaths_imputed)
+
+df_2021 <- df_2021 %>%
+  mutate(deaths_imputed = ifelse(is.na(Deaths), sample(1:9, sum(is.na(Deaths)), replace = TRUE), Deaths))
+
+summary(df_2021$deaths_imputed)
+
+#Removing Zeroes
+
+ggplot(df_2020, aes(deaths_imputed)) +
+  geom_histogram(bins =40)
+
+print(filter(df_2020, deaths_imputed < 1))
+
+#Creating crude rates
+
+df_2020$Crude_Rate_100k <- (df_2020$deaths_imputed / df_2020$total_pop) * 100000
+qqnorm(df_2020$Crude_Rate_100k)
+
+ggplot(df_2020, aes(Crude_Rate_100k)) +
+  geom_histogram(bins =40)
+
+df_2021$Crude_Rate_100k <- (df_2021$deaths_imputed / df_2021$total_pop) * 100000
+
+#Log transformed
+
+df_2020$log_crude_rate_100k <- log1p(df_2020$Crude_Rate_100k)
+qqnorm(df_2020$log_crude_rate_100k)
+
+df_2021$log_crude_rate_100k <- log1p(df_2021$Crude_Rate_100k)
+
+#Death rate
+
+ggplot(df_2020, aes(deaths_imputed))+
+  geom_histogram(bins = 40)
+
+ggplot(df_2020, aes(Crude_Rate_100k))+
+  geom_histogram(bins = 40)
+
+ggplot(df_2020, aes(log_crude_rate_100k))+
+  geom_histogram(bins = 40)
+
+
+```
+
+#outliers
+
+```{r}
+
+# Anderson-Darling test 
+ad_test_original <- ad.test(df_2020$Crude_Rate_100k) 
+ad_test_log <- ad.test(df_2020$log_crude_rate_100k) 
+
+# Print results 
+ad_test_original #larger deviation from normal
+ad_test_log #smaller than un-transformed
+
+#Modified z-score outliers
+
+summary(df_2020$log_crude_rate_100k)
+hist(df_2020$log_crude_rate_100k)
+
+median_value <- median(df_2020$log_crude_rate_100k)
+
+df_2020$abs_dev <- abs(df_2020$log_crude_rate_100k - median_value)
+
+mad_value <- median(df_2020$abs_dev)
+
+df_2020$modified_z_scores <- 0.6746 * (df_2020$abs_dev / mad_value)
+
+df_2020_mzs <- filter(df_2020, !modified_z_scores > 3.5)
+
+3135 - 3064 # less 74 Counties
+
+#Mainting county parity between years for analysis
+
+counties_2020 <- as.data.frame(df_2020_mzs$COUNTY)
+
+colnames(counties_2020)[1] <- "COUNTY"
+
+df_2021_mzs <- merge(df_2021, counties_2020, by = "COUNTY") 
+
+#Visualizing post-outliers
+
+ggplot(df_2020_mzs, aes(deaths_imputed))+
+  geom_histogram(bins = 40)
+
+ggplot(df_2020_mzs, aes(Crude_Rate_100k))+
+  geom_histogram(bins = 40)
+
+ggplot(df_2020_mzs, aes(log_crude_rate_100k))+
+  geom_histogram(bins = 40)
+
+qqnorm(df_2020_mzs$Crude_Rate_100k) #still not normal
+qqnorm(df_2020_mzs$log_crude_rate_100k) #almost normal
+
+shapiro.test(df_2020_mzs$log_crude_rate_100k) #fairly close to normal
+
+#log crude rate is more normal than untrasformed crude rate
+
+save(df_2020_mzs, file = "/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/df_2020_mzs.rda")
+save(df_2021_mzs, file = "/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/df_2021_mzs.rda")
+
+
+df_2021_mzs$abs_dev <- 0
+df_2021_mzs$modified_z_scores <- 0
+
+#Combined dataset
+
+df_mzs <- rbind(df_2020_mzs, df_2021_mzs)
+
+save(df_mzs, file = "/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/df_mzs.rda")
+
+```
+
+
+```{r}
+load("/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/df_2020_mzs.rda")
+
+load("/Users/fisherv1/Library/CloudStorage/OneDrive-MichiganStateUniversity/PROWESS/Research/03_Active Research/PLC_Intersectionality of Place/02_Data/df_2021_mzs.rda")
+
+
+```
+
+
+```{r}
+df_2020_analysis <- df_2020_mzs[,grep("COUNTY|log|deaths|dens_|med|total_pop|HOUDEN_COU", colnames(df_2020_mzs))]
+
+df_2020_analysis <- df_2020_analysis %>% dplyr::select(!c("COUNTY.y", "COUNTY_NAME"))
+
+colnames(df_2020_analysis)
+
+combinations <- list(
+  c(51003, 51540),
+  c(51005, 51580),
+  c(51820, 51790, 51015),
+  c(51680, 51031),
+  c(51640, 51035),
+  c(51730, 51570, 51053),
+  c(51610, 51600, 51059),
+  c(51840, 51069), 
+  c(51595, 51081),
+  c(51690, 51089),
+  c(51830, 51095),
+  c(51750, 51121),
+  c(51590, 51141),
+  c(51670, 51149),
+  c(51685, 51683, 51153),
+  c(51775, 51161),
+  c(51678, 51530, 51163),
+  c(51660, 51156),
+  c(51620, 51175),
+  c(51630, 51177),
+  c(51520, 51191),
+  c(51720, 51195),
+  c(51735, 51199)
+)
+
+
+sum_results <- list()
+
+
+
+# Initialize a list to store the results
+sum_results <- list()
+
+# Loop through each combination in 'combinations'
+for (comb in combinations) {
+  # Filter rows where ID is in the combination using dplyr::filter
+  df_combined <- df_2020_analysis %>%
+    dplyr::filter(COUNTY %in% comb) %>%
+    summarise(across(2:36, sum, na.rm = TRUE))
+  
+  # Store the result in the list with a descriptive name
+  sum_results[[paste(comb, collapse = "-")]] <- df_combined
+}
+
+# Convert the summed results to a data frame
+sum_df <- bind_rows(sum_results, .id = "Combination")
+
+
+#Independent cities and county combined codes 
+sum_df$COUNTY <- c(51901, 51903, 51907, 51911, 51913, 51918, 51919, 51921, 51923, 51929, 51931, 51933, 51939, 51941, 51942, 51944, 51945, 51947, 51949, 51951, 51953, 51955, 51958)
+
+sum_df <- sum_df %>% dplyr::select(!1)
+
+class(sum_df$COUNTY)
+
+sum_df$COUNTY <- as.factor(sum_df$COUNTY)
+
+df_2020_analysis <- df_2020_analysis %>% filter(!COUNTY %in% c(51003, 51540, 51005, 51580, 51820, 51790, 51015, 51680, 51031, 51640, 51035, 51730, 51570, 51053, 51610, 51600, 51059, 51840, 51069,51595, 51081,51690, 51089,51830, 51095,51750, 51121,51590, 51141,51670, 51149,51685, 51683,51153,51775, 51161,51678, 51530, 51163,51660, 51156,51620, 51175,51630, 51177,51520, 51191,51720, 51195,51735, 51199))
+
+df_2020_analysis <- rbind(df_2020_analysis, sum_df)
+
+# Sum data from independent cities and counties
+#county_mapping <- list(
+#  `51901` = c(51003, 51540),
+#  `51903` = c(51005, 51580),
+#  `51907` = c(51820, 51790, 51015),
+#  `51911` = c(51680, 51031),
+#  `51913` = c(51640, 51035),
+#  `51918` = c(51730, 51570, 51053),
+#  `51919` = c(51610, 51600, 51059),
+#  `51921` = c(51840, 51069), 
+#  `51923` = c(51595, 51081),
+#  `51929` = c(51690, 51089),
+#  `51931` = c(51830, 51095),
+#  `51933` = c(51750, 51121),
+#  `51939` = c(51590, 51141),
+#  `51941` = c(51670, 51149),
+#  `51942` = c(51685, 51683, 51153),
+#  `51944` = c(51775, 51161),
+#  `51945` = c(51678, 51530, 51163),
+#  `51947` = c(51660, 51156),
+#  `51949` = c(51620, 51175),
+#  `51951` = c(51630, 51177),
+#  `51953` = c(51520, 51191),
+#  `51955` = c(51720, 51195),
+#  `51958` = c(51735, 51199)
+#)
 
 ```
 
@@ -147,691 +699,1274 @@ colnames(df_mort)
 
 ```{r}
 
-summary(is.na(df_mort)) #median income
+#Domains:
+# Neighborhood density and access
+# healthcare access
+# healthy behavior access, parks and grocery stores
+# School density, access to public education
+# median home value, socioeconomic stability
+# rural-urban area ratio, rural health determinant
 
-#Imputing NA median income
+#MIAHDA examples use sex, race, education, income, age, and region of US in categories ranging from binary to categories of 4-6 levels 
 
-summary(is.na(df_mort$median_income_12_mo))
-
-med_income_na <- filter(df_mort, is.na(df_mort$median_income_12_mo))
-#25-34 range
-
-df_mort$median_income_12_mo <- ifelse(is.na(df_mort$median_income_12_mo), 29500, df_mort$median_income_12_mo)
-
-
-#Strata: age, sex, income, race
-
-#Income
+# dens_100k_n_houses + dens_100k_school_count + dens_100k_n_libraries03_17 + dens_100k_n_all_hospitals + dens_100k_n_outpatient_ctr_17 + med_household_value + dens_100k_COUNT_OPEN_PARKS + dens_100k_n_grocery_17 + rural_urb_area_ratio
 
 
-df_mort <- df_mort %>%
-  mutate(
-    # Calculate Q1, Q3, and IQR for 'value' (you can replace 'value' with any column)
-    Q1 = quantile(median_income_12_mo, 0.25, na.rm = TRUE),
-    Q3 = quantile(median_income_12_mo, 0.75, na.rm = TRUE),
-    
-    # Create categories based on IQR
-    strata_income_cat = case_when(
-      median_income_12_mo < Q1 ~ "low median income",                # Below the first quartile
-      median_income_12_mo >= Q1 & median_income_12_mo < median(median_income_12_mo, na.rm = TRUE) ~ "med-low median income", # Between Q1 and Q3
-      median_income_12_mo >= median(median_income_12_mo, na.rm = TRUE) & median_income_12_mo <= Q3 ~ "med-high median income", # Between Q1 and Q3
-      median_income_12_mo > Q3 ~ "high median income",               # Above the third quartile
-      TRUE ~ "low median income"                   # NA values indicate low median individual income levels by bracket
-    )
-  )
+#Strata
 
-table(df_mort$strata_income_cat)
+# education 
 
+df_2020_mzs$edu_dens <- standardise(df_2020_mzs$dens_100k_school_count + df_2020_mzs$dens_100k_n_libraries03_17)
 
-#Age
-summary(df_mort$median_age_total)
-hist(df_mort$median_age_total)
+ggplot(df_2020_mzs, aes(edu_dens, log_crude_rate_100k)) +
+  geom_smooth()
 
-df_mort <- df_mort %>%
-  mutate(
-    # Calculate Q1, Q3, and IQR for 'value' (you can replace 'value' with any column)
-    Q1 = quantile(median_age_total, 0.25, na.rm = TRUE),
-    Q3 = quantile(median_age_total, 0.75, na.rm = TRUE),
-    
-    # Create categories based on IQR
-    strata_age_cat = case_when(
-      median_age_total < Q1 ~ "1_age",                # Below the first quartile
-      median_age_total >= Q1 & median_age_total <= median(median_age_total) ~ "2_age", # Between Q1 and Q3
-      median_age_total > median(median_age_total) & median_age_total <= Q3 ~ "3_age", # Between Q1 and Q3
-      median_age_total > Q3 ~ "4_age",               # Above the third quartile
-      TRUE ~ "Unknown"                   # In case there are NA values
-    )
-  )
+Desc(df_2020_mzs$edu_dens)
 
-table(df_mort$strata_age_cat)
+hist(df_2020_mzs$edu_dens)
 
-#Sex
+p25 <- quantile(df_2020_mzs$edu_dens, .25)
+p75 <- quantile(df_2020_mzs$edu_dens, .75)
 
-df_mort$strata_sex_cat <- ifelse(df_mort$P_county_male_pop > 50, "Maj_Male", "Maj_Female")
-
-table(df_mort$strata_sex_cat)
-
-#Race (without ethnicity)
-
-df_mort$P_non_white_only_pop <- 100 - df_mort$P_county_white_pop
-
-df_mort$strata_race_cat <- cut(df_mort$P_non_white_only_pop, breaks = quantile(df_mort$P_non_white_only_pop, probs = 0:2 / 2), include.lowest = TRUE, labels = c("below median", "above median"))
-
-by(df_mort$P_non_white_only_pop, df_mort$strata_race_cat, summary)
-
-ggplot(df_mort, aes(P_non_white_only_pop)) +
-  geom_histogram() +
-  facet_grid(df_mort$strata_race_cat)
-
-#Composite strata
-
-df_mort$strata <- as.factor(paste(df_mort$strata_sex_cat, ",",
-                        df_mort$strata_age_cat, ",",
-                        df_mort$strata_race_cat, ",",
-                        df_mort$strata_income_cat))
-
-length(unique(df_mort$strata)) #64
-
-```
-
-#Mortality
-
-```{r}
-
-df_mort$covid_deaths <- as.numeric(df_mort$Deaths) #NAs introduced
-
-df_mort$Population <- as.numeric(df_mort$Population)
-
-df_mort$Population <- ifelse(is.na(df_mort$Population), df_mort$total_pop, df_mort$Population)
-summary(df_mort$Population)
-
-#Imputing suppressed deaths
-df_mort <- df_mort %>%
-  mutate(deaths_imputed = ifelse(is.na(covid_deaths), sample(1:4, sum(is.na(covid_deaths)), replace = TRUE), covid_deaths))
-
-summary(df_mort$deaths_imputed)
-
-#Crude rate
-
-df_mort$covid_mortality_rate_100k <- (df_mort$deaths_imputed / df_mort$Population) * 100000
-summary(df_mort$covid_mortality_rate_100k) #Almost normally distributed
-boxplot(df_mort$covid_mortality_rate_100k)
-
-#Separating county and state
-df_mort <- separate_wider_delim(df_mort, cols = `Residence County`, delim = ",", names = c("County", "State"))
+df_2020_mzs$edu_dens_cat <- cut(df_2020_mzs$edu_dens, breaks = c(-Inf, p25, p75, Inf), 
+             labels = c("25%ile edu", "26-74%ile edu", "75%ile edu"), 
+             include.lowest = TRUE)
 
 
-#Outliers 95%
+df_2020_mzs$edu_dens_cat <- as.factor(df_2020_mzs$edu_dens_cat)
+df_2020_mzs$edu_dens_cat <- relevel(df_2020_mzs$edu_dens_cat, ref = "26-74%ile edu")
 
-outliers <- as.data.frame(check_outliers(df_mort$covid_mortality_rate_100k))
+table(df_2020_mzs$edu_dens_cat)
 
-df_mort_95 <- df_mort[!outliers$Outlier, ]
+ggplot(df_2020_mzs, aes(edu_dens_cat, log_crude_rate_100k)) +
+  geom_boxplot()
 
-hist(df_mort_95$covid_mortality_rate_100k) # ostensibly normally distributed
-
-#As factors
-
-df_mort_95$strata_age_cat <- as.factor(df_mort_95$strata_age_cat)
-df_mort_95$strata_income_cat <- as.factor(df_mort_95$strata_income_cat)
-df_mort_95$strata_sex_cat <- as.factor(df_mort_95$strata_sex_cat)
-df_mort_95$strata_race_cat <- as.factor(df_mort_95$strata_race_cat)
-
-```
+school_model <- glmmTMB(log_crude_rate_100k ~ edu_dens_cat, df_2020_mzs)
+summary(school_model) 
 
 
-```{r}
+# healthcare
 
-#Checking cell counts of strata is sufficient for analysis
+df_2020_mzs$dens_hosp_and_outpt <- standardise(df_2020_mzs$dens_100k_n_outpatient_ctr_17 + df_2020_mzs$dens_100k_n_all_nursing_care_facilities_17 + df_2020_mzs$dens_100k_n_pharmacies_17)
 
-strata_df <- df_mort_95 %>%
+cor(df_2020_mzs$dens_100k_n_outpatient_ctr_17, df_2020_mzs$dens_100k_n_pharmacies_17)
+
+
+ggplot(df_2020_mzs, aes(dens_hosp_and_outpt, log_crude_rate_100k)) +geom_smooth()
+
+Desc(df_2020_mzs$dens_hosp_and_outpt)
+
+p25 <- quantile(df_2020_mzs$dens_hosp_and_outpt, .25)
+p75 <- quantile(df_2020_mzs$dens_hosp_and_outpt, .75)
+p50 <- quantile(df_2020_mzs$dens_hosp_and_outpt, .50)
+
+df_2020_mzs$health_dens_cat <- cut(df_2020_mzs$dens_hosp_and_outpt, breaks = c(-Inf, p25, p75, Inf), 
+             labels = c("25%ile healthcare", "26-74%ile healthcare", "75%ile healthcare"), 
+             include.lowest = TRUE)
+
+df_2020_mzs$health_dens_cat <- as.factor(df_2020_mzs$health_dens_cat)
+df_2020_mzs$health_dens_cat <- relevel(df_2020_mzs$health_dens_cat, ref = "26-74%ile healthcare")
+
+table(df_2020_mzs$health_dens_cat)
+
+ggplot(df_2020_mzs, aes(health_dens_cat, log_crude_rate_100k)) +
+  geom_boxplot() #not significantly assoc
+
+health_model <- glmmTMB(log_crude_rate_100k ~ health_dens_cat, df_2020_mzs)
+summary(health_model) #highest is negatively assoc significant
+
+
+#Neighborhood density and public mobility access
+
+#environment that promotes healthy behavior
+
+df_2020_mzs$env_comp_dens <- standardise(df_2020_mzs$dens_100k_n_grocery_17 + df_2020_mzs$dens_100k_COUNT_OPEN_PARKS + df_2020_mzs$dens_100k_COUNT_NTM_STOPS)
+
+ggplot(df_2020_mzs, aes(env_comp_dens)) +
+  geom_histogram(bins = 30)+
+  xlim(-1, 1)
+
+summary(df_2020_mzs$env_comp_dens)
+
+p25 <- quantile(df_2020_mzs$env_comp_dens, .25)
+p75 <- quantile(df_2020_mzs$env_comp_dens, .75)
+p50 <- quantile(df_2020_mzs$env_comp_dens, .5)
+
+
+df_2020_mzs$env_comp_cat <- cut(df_2020_mzs$env_comp_dens, breaks = c(-Inf, p50, Inf), 
+             labels = c("< 50%ile env", ">50%ile env"), 
+             include.lowest = TRUE)
+
+df_2020_mzs$env_comp_cat <- as.factor(df_2020_mzs$env_comp_cat)
+
+table(df_2020_mzs$env_comp_cat)
+
+ggplot(df_2020_mzs, aes(env_comp_cat, log_crude_rate_100k)) +
+  geom_boxplot() #not significantly assoc
+
+nbhd_model <- glmmTMB(log_crude_rate_100k ~ env_comp_cat, df_2020_mzs)
+summary(nbhd_model) #highest is negatively assoc significant
+
+#Household value and housing density
+
+df_2020_mzs$housing_value_density <- standardise(df_2020_mzs$med_household_value) + standardise(df_2020_mzs$HOUDEN_COU)
+summary(df_2020_mzs$housing_value_density )
+df_2020_mzs$housing_value_density_ratio <- df_2020_mzs$med_household_value / df_2020_mzs$HOUDEN_COU
+summary(df_2020_mzs$housing_value_density_ratio)
+summary(df_2020_mzs$med_household_value)
+
+p25 <- quantile(df_2020_mzs$housing_value_density_ratio, .25)
+p75 <- quantile(df_2020_mzs$housing_value_density_ratio, .75)
+p50 <- quantile(df_2020_mzs$housing_value_density_ratio, .50)
+
+df_2020_mzs$hh_val_dens_cat <- cut(df_2020_mzs$housing_value_density_ratio, breaks = c(-Inf, p25, p50, p75, Inf), 
+             labels = c("Q1 home value density", "Q2 home value density", "Q3 home value density", "Q4 home value density"), 
+             include.lowest = TRUE)
+
+df_2020_mzs$hh_val_dens_cat <- as.factor(df_2020_mzs$hh_val_dens_cat)
+df_2020_mzs$hh_val_dens_cat <- relevel(df_2020_mzs$hh_val_dens_cat, ref = "Q1 home value density")
+
+table(df_2020_mzs$hh_val_dens_cat)
+
+hh_model <- glmmTMB(log_crude_rate_100k ~ hh_val_dens_cat, df_2020_mzs)
+summary(hh_model) #highest is negatively assoc significant
+
+
+
+df_2020_mzs$strata <- paste(df_2020_mzs$hh_val_dens_cat, ", ", 
+                        df_2020_mzs$edu_dens_cat, ", ",
+                        df_2020_mzs$health_dens_cat, ", ",
+                        df_2020_mzs$env_comp_cat, ", ")
+
+df_2020_mzs$strata <- as.factor(df_2020_mzs$strata)
+
+table(df_2020_mzs$strata) #hmm hmm hmm
+
+
+length(unique(df_2020_mzs$strata)) #68
+ggplot(df_2020_mzs, aes(housing_value_density_ratio, log_crude_rate_100k))+
+  geom_smooth()
+
+
+strata_df <- df_2020_mzs %>%
   group_by(strata) %>%
   mutate(strataN = n())
+
+Desc(strata_df$Crude_Rate_100k)
 
 total_rows <- length(strata_df$strataN)
 rows_with_20_or_more <- sum(strata_df$strataN >= 20) 
 percentage <- (rows_with_20_or_more / total_rows) * 100
 
-print(percentage) #95
+print(percentage) #98% have 10 or more, 95% have more than 20
 
-strata_sum <- df_mort_95 %>%
+#Strata means 
+
+strata_means <- df_2020_mzs %>% 
   group_by(strata) %>%
-  summarise(across(where(is.numeric), ~ mean(., na.rm = TRUE)))
+  summarise(across(where(is.numeric), ~mean(., na.rm = TRUE)))
 
-ggplot(strata_df, aes(reorder(strata, covid_mortality_rate_100k, FUN = median), covid_mortality_rate_100k))+
-  geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+Desc(strata_means$Crude_Rate_100k)
+Desc(df_2020_mzs$Crude_Rate_100k)
+Desc(df_2021_mzs$Crude_Rate_100k)
 
-ggplot(strata_df, aes(reorder(strata, strataN, FUN = median)))+
-  geom_bar() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
-  xlab("Strata")
+ggplot(strata_means, aes(Crude_Rate_100k)) +
+  geom_histogram(bins = 10 , 
+                 fill = "white",
+                 color = "blue")
+  
 
-#Descriptive statistics
+qqnorm(strata_means$Crude_Rate_100k)
 
-colnames(df_mort_95)
 
-table1 <- df_mort_95 %>% dplyr::select(c("covid_mortality_rate_100k", "median_income_12_mo", "median_age_total", "P_county_male_pop", "P_non_white_only_pop"))
+```
+
+#Domain PCA
+
+
+#PCA per domain
+
+```{r}
+#SDOH domains 
+
+education <- df_2020_analysis %>% dplyr::select(c(2, "dens_100k_school_count", "dens_100k_n_libraries03_17", "dens_100k_n_museums03_17"))
+education <- standardise(education)
+
+econ_environmental <- df_2020_analysis %>% dplyr::select(c(2, "dens_100k_COUNT_TRI_FACILITIES", "dens_100k_COUNT_NTM_STOPS", "med_household_value", "HOUDEN_COU", "dens_100k_COUNT_OPEN_PARKS", "dens_100k_n_police_dept03_17", "dens_100k_nfire_dept03_17"))
+econ_environmental <- standardise(econ_environmental)
+
+food <- df_2020_analysis %>% dplyr::select(c("dens_100k_n_grocery_17", "dens_100k_n_conv_store03_17", "dens_100k_n_gas_w_conv03_17", "dens_100k_n_specialty_food_17", "dens_100k_n_liquor_stores03_17", "dens_100k_n_tobacco03_17"))
+food <- standardise(food)
+
+socio_cultural <- df_2020_analysis %>% dplyr::select(c("dens_100k_count_veteransorgs", "dens_100k_count_religiousorgs", "dens_100k_count_youthorgs", "dens_100k_count_childyouthservices", "dens_100k_count_indivfamilyservices", "dens_100k_count_childdaycareservices"))
+socio_cultural <- standardise(socio_cultural)
+
+healthcare <- df_2020_analysis %>% dplyr::select(c("dens_100k_count_elderdisabservices", "dens_100k_n_pharmacies_17", "dens_100k_n_mental_health_absue_car_facil_17", "dens_100k_count_substanceabusecounseling", "dens_100k_n_all_hospitals_17", "dens_100k_n_outpatient_ctr_17", "dens_100k_n_all_nursing_care_facilities_17"))
+healthcare <- standardise(healthcare)
+
+#PCA
+edu_pca <- prcomp(education, scale. = FALSE)
+summary(edu_pca)
+
+# Combine the scores by weighting each component's score by its proportion of variance explained
+df_2020_analysis$edu_pca <- edu_pca$x[, 1]
+summary(df_2020_analysis$edu_pca)
+
+#econ
+
+ee_pca <- prcomp(econ_environmental, scale. = FALSE)
+summary(ee_pca)
+
+# Combine the scores by weighting each component's score by its proportion of variance explained
+df_2020_analysis$econ_env_pca <- ee_pca$x[, 1]
+summary(df_2020_analysis$econ_env_pca)
+
+#Food
+fd_pca <- prcomp(food, scale. = FALSE)
+summary(fd_pca)
+autoplot(fd_pca)
+
+# Combine the scores by weighting each component's score by its proportion of variance explained
+df_2020_analysis$food_pca <- fd_pca$x[, 1]
+summary(df_2020_analysis$food_pca)
+
+#Socio cultural
+
+socio_cultural_pca <- prcomp(socio_cultural, scale. = FALSE)
+summary(socio_cultural_pca)
+autoplot(socio_cultural_pca, loadings = TRUE)
+
+df_2020_analysis$socio_cultural_pca <-  socio_cultural_pca$x[, 1]
+summary(df_2020_analysis$socio_cultural_pca)
+
+#Healthcare 
+
+healthcare_pca_fit <- prcomp(healthcare, scale. = FALSE)
+summary(healthcare_pca_fit)
+autoplot(healthcare_pca_fit, loadings = TRUE)
+
+# Combine the scores by weighting each component's score by its proportion of variance explained
+df_2020_analysis$healthcare_pca <- healthcare_pca_fit$x[, 1]
+summary(df_2020_analysis$healthcare_pca)
+
+ggplot( df_2020_analysis, aes(healthcare_pca, log_crude_rate_100k))+
+  geom_point()
+
+
+glmm_pca <- glmmTMB(log_crude_rate_100k ~ healthcare_pca + socio_cultural_pca + food_pca + econ_env_pca + edu_pca, data = df_2020_analysis)
+
+tbl_regression(glmm_pca, exponentiate = TRUE)
+
+```
+
+#Kmeans ??
+
+```{r}
+
+k_means_df <- df_2020_mzs %>% dplyr::select(c("healthcare_pca", "socio_cultural_pca", "food_pca", "econ_env_pca", "edu_pca"))
+class(k_means_df)
+
+k_means_result <- kmeans(k_means_df, 3)
+
+df_2020_mzs$cluster <- k_means_result$cluster
+
+table(df_2020_mzs$cluster)
+
+by(df_2020_mzs$log_crude_rate_100k, df_2020_mzs$cluster, summary)
+
+```
+
+
+
+#Table 1
+
+```{r}
+
+table1 <- df_2020_mzs %>% dplyr::select(c("total_pop", "ALAND_Mi²_COU", "deaths_imputed", "Crude_Rate_100k", "log_crude_rate_100k", "med_household_value", "n_outpatient_ctr_17", "dens_100k_n_outpatient_ctr_17", "n_pharmacies_17", "dens_100k_n_pharmacies_17", "n_grocery_17", "dens_100k_n_grocery_17", "school_count", "dens_100k_school_count", "COUNT_OPEN_PARKS", "dens_100k_COUNT_OPEN_PARKS", "dens_100k_n_grocery_17", "n_grocery_17", "COUNT_NTM_STOPS", "dens_100k_COUNT_NTM_STOPS", "HOUDEN_COU"))
+
+
 
 Desc(table1)
 
-#Graphs of within-group variance
 
-ggplot(df_mort_95, aes(strata_sex_cat, P_county_male_pop))+
-  geom_boxplot()+
+#Covid by category
+
+by(df_2020_mzs$med_household_value, df_2020_mzs$hh_value_cat, summary)
+
+by(df_2020_mzs$Crude_Rate_100k, df_2020_mzs$env_dens_cat, mean)
+by(df_2020_mzs$Crude_Rate_100k, df_2020_mzs$env_dens_cat, sd)
+
+
+```
+
+
+
+
+#Model selection
+
+```{r}
+#Model selection
+summary(df_2020_mzs$Crude_Rate_100k)
+
+#With state 
+
+m1 <- glmmTMB(log_crude_rate_100k ~ 1 + (1 | strata), data = df_2020_mzs)
+summary(m1)
+AIC(m1) #6637.6
+
+check_model(m1)
+
+#VPC
+0.1804 / (0.1804 + 0.4970) #0.2663124%, sufficient evidence for grouping
+
+#Count mode selection 
+
+
+poisson_model <- glmmTMB(deaths_imputed ~ offset(log(total_pop)) + (1 | strata), data = df_2020_mzs, family = poisson)
+nb_model <- glmer.nb(deaths_imputed ~ offset(log(total_pop)) + (1 | strata), data = df_2020_mzs) #AIC 30390.83
+summary(nb_model)
+AIC(poisson_model, nb_model) #negative binomial preferred
+
+set.seed(123)
+m2 <- glmmTMB(deaths_imputed ~ offset(log(total_pop)) + (1 | strata), family = nbinom2, data = df_2020_mzs)
+summary(m2)
+AIC(m2) #30390.29
+tab_model(m2, show.se = T)
+
+compare_performance(m1, m2, nb_model, rank= TRUE) #m1 preferred
+
+```
+
+
+#Main Models
+
+```{r}
+
+#df_2020_mzs$strata <- paste(df_2020_mzs$hh_val_dens_cat, ", ", 
+#                        df_2020_mzs$edu_dens_cat, ", ",
+#                        df_2020_mzs$health_dens_cat, ", ",
+#                        df_2020_mzs$env_comp_cat, ", ")
+
+#standardise(housing_value_density_ratio) + standardise(edu_dens) + standardise(env_comp_dens) + standardise(dens_hosp_and_outpt)
+# hh_val_dens_cat:edu_dens_cat:health_dens_cat:env_comp_cat
+#GglmmTMB
+m0 <- glmmTMB(log_crude_rate_100k ~ 1 + (1 | strata), data = df_2020_mzs)
+summary(m0) #0.09244
+BIC(m0) #6653.478
+check_model(m0)
+v_null <- get_variance(m0)
+
+sim_res <- simulateResiduals(m0)
+
+# Plot diagnostics
+plot(sim_res)
+
+# Ranef
+
+ranef_vals <- as.data.frame(ranef(m0)$cond)
+
+(0.09244 / (0.09244 + 0.52507) * 100) #14.9698
+
+icc(m0) #0.266 -- ~23% of the variation in mortality rate is due to which strata a particular observation belongs to
+
+df_2020_mzs$m0Am <- predict(m0)
+
+summary(exp(df_2020_mzs$m0Am))
+summary(df_2020_mzs$Crude_Rate_100k)
+
+#partial adjusted
+colnames(df_2020_mzs)
+#housing value density
+
+m_hh_value <- glmmTMB(log_crude_rate_100k ~ standardise(housing_value_density_ratio) + (1 | strata), data = df_2020_mzs)
+icc(m_hh_value)$ICC_adjusted #0.266129
+
+v_hhvalue <- get_variance(m_hh_value)
+
+# Education Density 
+m_edu <- glmmTMB(log_crude_rate_100k ~  standardise(edu_dens) + (1 | strata), data = df_2020_mzs)
+icc(m_edu)$ICC_adjusted #0.1916745
+summary(m_edu) 
+BIC(m_edu) #6674.385
+v_edu <- get_variance(m_edu)
+
+# Extract variance components
+vc <- VarCorr(m_edu)
+level2_var <- vc$cond$strata["(Intercept)", "(Intercept)"]
+level1_var <- sigma(m_edu)^2
+vpc <- level2_var / (level2_var + level1_var)
+vpc #0.1916745
+
+
+#Env density
+m_env <- glmmTMB(log_crude_rate_100k ~ standardise(env_comp_dens) + (1 | strata), data = df_2020_mzs)
+icc(m_env)$ICC_adjusted #0.2694891
+summary(m_env) #env density IS significant
+BIC(m_env) #6710.924,
+v_env <- get_variance(m_env)
+
+#Health density
+
+m_health <- glmmTMB(log_crude_rate_100k ~ standardise(dens_hosp_and_outpt) +  (1 | strata), data = df_2020_mzs)
+icc(m_health)$ICC_adjusted #0.2684501
+summary(m_health) #not significant
+BIC(m_health) #6713.024,
+v_health <- get_variance(m_health)
+
+BIC(m_edu, m_env, m_health, m_hh_value, m0)
+
+compare_parameters(m_edu, m_env, m_health, m_hh_value, exponentiate = TRUE) #hh value level 2 is most informative, then food density; hosp-nursing level 2 and law enforcement level 2 density are least strong predictor
+
+# PCV (proportional change in between-strata variance)
+# from null-model to hh value -model
+(v_null$var.random - v_hhvalue$var.random) / v_null$var.random
+# 0.1407638 most relevant predictor
+
+# PCV from null-model to schools-model 
+(v_null$var.random - v_edu_count$var.random) / v_null$var.random 
+# -0.0711097
+
+# PCV from null-model to environment-model
+(v_null$var.random - v_env_count$var.random) / v_null$var.random
+# -0.1008505
+
+#> # PCV from null-model to food-model
+(v_null$var.random - v_nbhd_count$var.random) / v_null$var.random
+# -0.09207105
+
+#> # PCV from null-model to health-model
+(v_null$var.random - v_health_count$var.random) / v_null$var.random
+# -0.08244156
+
+#> # PCV from null-model to law-model
+(v_null$var.random - v_rural$var.random) / v_null$var.random
+# 0.07842148
+
+#Fully adjusted model
+
+continuous_no_interaction <- glmmTMB(log_crude_rate_100k ~ standardise(housing_value_density_ratio) + standardise(edu_dens) + standardise(env_comp_dens) + standardise(dens_hosp_and_outpt) +  (1 | strata), data = df_2020_mzs)
+continuous_no_interaction %>% tbl_regression(exponentiate = TRUE)
+BIC(continuous_no_interaction) #6652.237
+summary(continuous_no_interaction) #0.07829
+(0.1657 / (0.1657 + 0.4872)) * 100 #25.37908
+icc(continuous_no_interaction)$ICC_adjusted #0.1473243 it went from 23% to ~19.6%
+
+df_2020_mzs$m4Am <- predict(continuous_no_interaction)
+
+summary(exp(df_2020_mzs$m4Am))
+summary(df_2020_mzs$Crude_Rate_100k)
+
+#PCV
+(0.1799 / 0.1804) * 100 #99.72284
+
+predictions <- predict_response(
+  continuous_no_interaction,
+  c("strata"),
+  type = "random"
+)
+
+#plot(ggpredict(continuous_no_interaction, terms = c("env_comp_cat", "edu_dens_cat",  "health_dens_cat", "hh_val_dens_cat"),
+#               type = "random"))
+
+ggplot(predictions, aes(reorder(x, predicted, FUN = median), predicted))+
+  geom_boxplot() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
-regression_table2b <- df_mort_95 %>% dplyr::select(c("strata_age_cat",  "strata_race_cat", "strata_sex_cat", "strata_income_cat", "median_income_12_mo", "median_age_total", "P_county_male_pop", "P_non_white_only_pop"))
+plot(predictions)
+
+predictions_output <- test_predictions(predictions)
+
+#this is promising
+
+#Less non-significant variables
+
+significant_only_no_interaction <- glmmTMB(log_crude_rate_100k ~ standardise(housing_value_density_ratio) +  standardise(env_comp_dens) + (1 | strata), data = df_2020_mzs)
+BIC(significant_only_no_interaction) #6639.743
+summary(significant_only_no_interaction) #6609.6
+(0.1812 / (0.1812 +0.4917)) * 100 #26.92822
+BICtab(m0, continuous_no_interaction, significant_only_no_interaction) #not a significant improvement over m4
 
 
-```
+#With interaction terms
 
-#Model selection    
+df_2020_mzs$interactive_continuous <- standardise(df_2020_mzs$housing_value_density_ratio) * standardise(df_2020_mzs$edu_dens) * standardise(df_2020_mzs$env_comp_dens) * standardise(df_2020_mzs$dens_hosp_and_outpt)
 
-```{r}
+interactive_continuous_1 <- glmmTMB(log_crude_rate_100k ~ standardise(housing_value_density_ratio) + standardise(edu_dens) + standardise(env_comp_dens) + standardise(dens_hosp_and_outpt) + interactive_continuous +  (1 | hh_val_dens_cat:edu_dens_cat:health_dens_cat:env_comp_cat), data = df_2020_mzs)
+summary(interactive_continuous_1) #interactive continuous is significant
+BIC(interactive_continuous_1) #6655.606
 
-lmer1 <- lmer(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_95)
-summary(lmer1)
-check_model(lmer1)
-AIC(lmer1) #30847.34
+interactive_continuous_2 <- glmmTMB(log_crude_rate_100k ~ standardise(housing_value_density_ratio) * standardise(edu_dens) * standardise(env_comp_dens) * standardise(dens_hosp_and_outpt) +  (1 | hh_val_dens_cat:edu_dens_cat:health_dens_cat:env_comp_cat), data = df_2020_mzs)
+summary(interactive_continuous_2) #interactive continuous is significant
+BIC(interactive_continuous_2) #6596.862
 
-glmm1 <- glmmTMB(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_95, family = "gaussian")
-summary(glmm1)
-check_model(glmm1)
-AIC(glmm1) #30851.03
+#only significant variables
+interactive_significant_only <- glmmTMB(log_crude_rate_100k ~ standardise(housing_value_density_ratio)*standardise(env_comp_dens) +  (1 | strata), data = df_2020_mzs)
+summary(interactive_significant_only)
+interactive_significant_only %>% tbl_regression(exp = TRUE)
+(0.1821 / (0.1821 + 0.4875)) #0.2719534
+BIC(interactive_significant_only) #6622.575, vast improvement
 
-brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_95, family = "gaussian")
-summary(brms1)
-check_model(brms1)
-loo(brms1) #looic 30694.8
+#With all strata
+interactive_continuous3 <- glmmTMB(log_crude_rate_100k ~ interactive_continuous + (1 | strata), data = df_2020_mzs)
+summary(interactive_continuous3)
+BIC(interactive_continuous3) #6657.727
 
+BICtab(m0, continuous_no_interaction, significant_only_no_interaction, interactive_continuous_1, interactive_continuous_2, interactive_significant_only, interactive_continuous3)
 
-compare_performance(lmer1, glmm1, rank = TRUE) #glmm1 is preferred, but LMER is similar. LMER for manuscript
+#using strata as fixed effects -- getting error
 
-```
+maihda_1 <- glmmTMB(log_crude_rate_100k ~  hh_val_dens_cat + edu_dens_cat + health_dens_cat + env_comp_cat +  (1 | hh_val_dens_cat:edu_dens_cat:health_dens_cat:env_comp_cat), data = df_2020_mzs)
+maihda_1 %>% tbl_regression(exponentiate = TRUE)
+BIC(maihda_1) #6633.251
+summary(maihda_1) #0.01259
+icc(maihda_1)$ICC_adjusted #0.02462387 it went to 2.4%
+r2(maihda_1) #conditional 0.168; marginal 0.146
+BICtab(continuous_no_interaction, significant_only_no_interaction, maihda_1,interactive_continuous_1, interactive_continuous_2, interactive_significant_only, interactive_continuous3)
+#Density continuous
 
+compare_performance(m0, continuous_no_interaction, rank = TRUE) #continuous variables are preferred
 
+check_model(continuous_no_interaction)
+r2(continuous_no_interaction) #conditional .26; marginal 0.009
 
-#GLMM (for manuscript)
+levels(df_2020_mzs$strata)
 
-```{r}
-#Unadjusted
-
-glmm1 <- glmmTMB(covid_mortality_rate_100k ~ 1 + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(glmm1)
-confint(glmm1)
-AIC(glmm1) #30735.53
-icc(glmm1)$ICC_adjusted #0.3333385
-check_model(glmm1)
-
-537.2 / (537.2 + 1074.3) #0.333354
-
-plot(ggpredict(glmm1, terms = c("strata_age_cat", "strata_race_cat", "strata_sex_cat",  "strata_income_cat"),
-               type = "random"))
-
-#Adjusted with continuous strata
-
-glmm2 <- glmmTMB(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(glmm2)
-confint(glmm2)
-AIC(glmm2) #30535.35
-icc(glmm2)$ICC_adjusted #0.1199105
-check_model(glmm2)
-
-140.2 / (140.2 + 1029.2) #0.1198905
-
-#Adjusted with categorical strata
-
-glmm3 <- glmmTMB(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(glmm3)
-confint(glmm3)
-AIC(glmm3) #30623.46
-icc(glmm3)$ICC_adjusted #0.03507287
-check_model(glmm3)
-
-39.15 / (39.15 + 1077.10 ) * 100 #3.507279
-
-#K-fold cross validation using MAE
-
-model_formula <- covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat)
-
-# k-fold function
-k_fold_cv_glmmTMB <- function(data, k = 20, formula) {
-  
-  # Vector to store RMSE or other metrics for each fold
-  rmse_values <- numeric(k)
-  
-  # Randomly split data into k folds
-  set.seed(42)  # For reproducibility
-  folds <- sample(1:k, nrow(data), replace = TRUE)
-  
-  # Loop through each fold
-  for (i in 1:k) {
-    
-    # Create training and test sets based on the fold
-    test_indices <- which(folds == i)
-    train_indices <- setdiff(1:nrow(data), test_indices)
-    
-    # Create training and test datasets
-    train_data <- data[train_indices, ]
-    test_data <- data[test_indices, ]
-    
-    # Fit the model using glmmTMB on the training data
-    model <- glmmTMB(formula, data = train_data)
-    
-    # Predict on the test set
-    predictions <- predict(model, newdata = test_data, type = "response")
-    
-    # Calculate MAE for the test set
-     rmse_values[i] <- sqrt(mean((predictions - test_data$covid_mortality_rate_100k)^2))
-  }
-  
-  # Return the average MAE across all folds
-  mean_rmse <- mean(rmse_values)
-  return(mean_rmse)
-}
-
-
-# Run 10-fold cross-validation for the multilevel model
-cv_result <- k_fold_cv_glmmTMB(df_mort_95, k = 20, formula = model_formula)
-
-# View the average RMSE result
-print(cv_result) #33
-
-#Single-line model
-
-glmm4 <- glmmTMB(covid_mortality_rate_100k ~ strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat, df_mort_95, family = "gaussian")
-summary(glmm4)
-AIC(glmm4) #30597
-check_model(glmm4)
-performance::r2(glmm4) #.352
-confint(glmm4)
-
-compare_performance(glmm1, glmm2, glmm3, glmm4)
-anova(glmm1, glmm2, glmm3, glmm4)
-
-#Sensitivity analysis Model 5
-
-glmm5 <- glmmTMB(covid_mortality_rate_100k ~ standardise(median_age_total)*standardise(median_income_12_mo)*standardise(P_county_male_pop)*standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(glmm5)
-AIC(glmm5) #30503.24
-confint(glmm5)
-check_model(glmm5)
-
-#K-fold cross validation using MAE
-
-model_formula <- covid_mortality_rate_100k ~ standardise(median_age_total)*standardise(median_income_12_mo)*standardise(P_county_male_pop)*standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat)
-
-# k-fold function
-k_fold_cv_glmmTMB <- function(data, k = 20, formula) {
-  
-  # Vector to store RMSE or other metrics for each fold
-  rmse_values <- numeric(k)
-  
-  # Randomly split data into k folds
-  set.seed(42)  # For reproducibility
-  folds <- sample(1:k, nrow(data), replace = TRUE)
-  
-  # Loop through each fold
-  for (i in 1:k) {
-    
-    # Create training and test sets based on the fold
-    test_indices <- which(folds == i)
-    train_indices <- setdiff(1:nrow(data), test_indices)
-    
-    # Create training and test datasets
-    train_data <- data[train_indices, ]
-    test_data <- data[test_indices, ]
-    
-    # Fit the model using glmmTMB on the training data
-    model <- glmmTMB(formula, data = train_data)
-    
-    # Predict on the test set
-    predictions <- predict(model, newdata = test_data, type = "response")
-    
-    # Calculate MAE for the test set
-    rmse_values[i] <- sqrt(mean((predictions - test_data$covid_mortality_rate_100k)^2))
-  }
-  
-  # Return the average MAE across all folds
-  mean_rmse <- mean(rmse_values)
-  return(mean_rmse)
-}
-
-
-# Run 10-fold cross-validation for the multilevel model
-cv_result <- k_fold_cv_glmmTMB(df_mort_95, k = 20, formula = model_formula)
-
-# View the average RMSE result
-print(cv_result) #32.5
-
-127 / (127 + 1013) #0.1114035
-
-anova(glmm2, glmm4, glmm5)
-
-compare_performance(glmm1, glmm2, glmm3, glmm4, glmm5)
-```
-
-
-#MAE 
-
-```{r}
-#Predictions and MAE, boostrapping 95% CI
-
-predictions1 <- predict(glmm1, newdata = df_mort_95)
-predictions2 <- predict(glmm2, newdata = df_mort_95)
-predictions3 <- predict(glmm3, newdata = df_mort_95)
-predictions4 <- predict(glmm4, newdata = df_mort_95)
-predictions5 <- predict(glmm5, newdata = df_mort_95)
-
-actual_values <- df_mort_95$covid_mortality_rate_100k
-
-mae1 <- mean(abs(actual_values - predictions1))
-mae2 <- mean(abs(actual_values - predictions2))
-mae3 <- mean(abs(actual_values - predictions3))
-mae4 <- mean(abs(actual_values - predictions4))
-mae5 <- mean(abs(actual_values - predictions5))
-
-# Example Data
-# Assuming df_mort_95 is your dataset and glmm1, glmm2, glmm3, glmm4 are your models
-
-# Fit your models (assuming these are already fitted)
-# glmm1 <- glmer(..., data = df_mort_95)
-# glmm2 <- glmer(..., data = df_mort_95)
-# glmm3 <- glmer(..., data = df_mort_95)
-# glmm4 <- glmer(..., data = df_mort_95)
-
-# Function to calculate MAE for a bootstrap sample
-calculate_mae <- function(data, model) {
-  # Resample the data with replacement
-  bootstrap_sample <- data[sample(nrow(data), replace = TRUE), ]
-  
-  # Generate predictions for the bootstrap sample
-  bootstrap_predictions <- predict(model, newdata = bootstrap_sample, re.form = NULL)
-  
-  # Calculate and return the MAE for the bootstrap sample
-  mae <- mean(abs(bootstrap_sample$covid_mortality_rate_100k - bootstrap_predictions))  # Replace 'Y' with the actual dependent variable name
-  return(mae)
-}
-
-# Number of bootstrap samples (e.g., 1000 iterations)
-n_bootstrap <- 1000
-
-# Function to calculate CI for MAE of a model
-calculate_ci_for_mae <- function(model, data, n_bootstrap = 1000) {
-  mae_values <- numeric(n_bootstrap)
-  
-  # Perform bootstrap resampling and calculate MAE for each sample
-  for (i in 1:n_bootstrap) {
-    mae_values[i] <- calculate_mae(data, model)
-  }
-  
-  # Calculate the 95% confidence interval for MAE
-  ci_lower <- quantile(mae_values, 0.025)
-  ci_upper <- quantile(mae_values, 0.975)
-  
-  return(c(ci_lower, ci_upper))
-}
-
-# Calculate confidence intervals for each model
-ci_glmm1 <- calculate_ci_for_mae(glmm1, df_mort_95, n_bootstrap)
-ci_glmm2 <- calculate_ci_for_mae(glmm2, df_mort_95, n_bootstrap)
-ci_glmm3 <- calculate_ci_for_mae(glmm3, df_mort_95, n_bootstrap)
-ci_glmm4 <- calculate_ci_for_mae(glmm4, df_mort_95, n_bootstrap)
-ci_glmm5 <- calculate_ci_for_mae(glmm5, df_mort_95, n_bootstrap)
-
-# Print the confidence intervals for each model
-cat("95% CI for MAE (GLMM 1): [", ci_glmm1[1], ", ", mae1, ", ", ci_glmm1[2], "]\n")
-cat("95% CI for MAE (GLMM 2): [", ci_glmm2[1], ", ", mae2, ", ", ci_glmm2[2], "]\n")
-cat("95% CI for MAE (GLMM 3): [", ci_glmm3[1], ", ", mae3, ", ", ci_glmm3[2], "]\n")
-cat("95% CI for MAE (GLMM 4): [", ci_glmm4[1], ", ", mae4, ", ", ci_glmm4[2], "]\n")
-cat("95% CI for MAE (GLMM 4): [", ci_glmm5[1], ", ", mae5, ", ", ci_glmm5[2], "]\n")
-AIC(glmm1)
-AIC(glmm2)
-AIC(glmm3)
-AIC(glmm4)
-
-simulationOutput <- simulateResiduals(fittedModel = glmm5, plot = F)
-plot(simulationOutput)
+lowest_strata <- filter(df_2020_mzs, strata == "Q4 hh_val_dens_ratio ,  26-74%ile edu ,  75%ile healthcare ,  >50%ile env , ")
 
 ```
 
 
-
-#Predictions by strata for each model
-
 ```{r}
 
-models <- list(glmm1, glmm2, glmm3, glmm4, glmm5)
-
-# Define strata of interest (example: subset based on a certain variable, e.g., "group")
-strata_data1 <- subset(df_mort_95, strata == "Maj_Male , 1_age , below median , low median income")
-strata_data1$strata <- "Majority Male, Q1 median age, below median %ile non-white population, Q1 median income (n = 11)"
-strata_data2 <- subset(df_mort_95, strata == "Maj_Male , 4_age , above median , high median income")
-strata_data2$strata <- "Majority Male, Q4 median age, above median %ile non-white population, Q4 median income (n = 12)"
-strata_data3 <- subset(df_mort_95, strata == "Maj_Female , 2_age , above median , high median income")
-strata_data3$strata <- "Majority Female, Q2 median age, above median %ile non-white population, Q4 median income (n = 107)"
-strata_data4 <- subset(df_mort_95, strata == "Maj_Male , 3_age , below median , med-high median income")
-strata_data4$strata <- "Majority Male, Q3 median age, below median %ile non-white population, Q3 median income (n = 100)"
-
-strata_data <- rbind(strata_data1, strata_data2, strata_data3, strata_data4)
-
-# Create a function to extract predicted values for a specific strata
-get_predictions <- function(model, newdata) {
-  predict(model, newdata = newdata, type = "response", re.form = NA)  # or use re.form = NULL depending on random effects
-}
-
-# Extract predictions for each model and strata
-predictions_list <- lapply(models, get_predictions, newdata = strata_data)
-
-# Combine predictions into a single data frame for comparison
-predictions_df <- data.frame(strata_data, do.call(cbind, predictions_list))
-
-# Rename the columns for clarity
-colnames(predictions_df)[(ncol(strata_data)+1):ncol(predictions_df)] <- paste("Model", 1:5)
+# Extract random effects
+random_effects <- ranef(m4, condVar = TRUE)$cond$`hh_value_cat:health_dens_cat:edu_dens_cat:env_dens_cat:nbhd_dens_cat:rural_area_cat`
 
 
-# View the resulting dataframe with predictions for each model
-head(predictions_df)
+# Add fixed effect intercept to random effects (optional)
+fixed_intercept <- fixef(m4)$cond[1]
+random_effects <- data.frame(
+  group = rownames(random_effects),
+  random_intercept = random_effects[, 1],
+  adjusted = random_effects[, 1] + fixed_intercept
+)
 
-predictions_long <- predictions_df %>%
-  gather(key = "Model", value = "Predicted", `Model 1`:`Model 5`) %>%
-  select(strata, Predicted, covid_mortality_rate_100k, Model)
+random_effects$crude_rate <- exp(random_effects$adjusted)
 
-real_data <- select(strata_data, covid_mortality_rate_100k)
-real_data$Model <- "Observed"
-real_data$strata <- strata_data$strata
-real_data$Predicted <- real_data$covid_mortality_rate_100k
-
-predictions_long <- rbind(predictions_long, real_data) 
-
-by(predictions_long$Predicted, predictions_long$Model, summary)
-
-#mean values
-
-mean_values <- predictions_long %>%
-  group_by(Model, strata) %>%
-  summarise(Mean_Pred = mean(Predicted, na.rm = TRUE))
-
-mean_observed <- predictions_long %>%
-  filter(Model == "Observed") %>%
-  summarise(Mean_Pred = mean(Predicted, na.rm = TRUE))
+random_effects <- random_effects[order(random_effects$crude_rate), ]
 
 
-observed_means <- predictions_long %>%
-  filter(Model == "Observed") %>%
-  group_by(strata) %>%
-  summarise(Observed_Mean = mean(Predicted, na.rm = TRUE))
 
 
-global_mean <- mean(df_mort_95$covid_mortality_rate_100k)
 
-ggplot(predictions_long, aes(x = Model, y = Predicted, group = Model, color = Model)) +
+ggplot(random_effects, aes(crude_rate)) +
+  geom_histogram()
+
+random_effects <- random_effects %>%
+  mutate(group = reorder(group, crude_rate))
+
+ggplot(random_effects, aes(x = group, y = crude_rate)) +
   geom_boxplot() +
-  stat_summary(fun.y = mean, geom = "point", shape = 20, size = 2, color = "black", fill = "black") +
-  labs(
-    title = "Figure 1: Comparison across models for strata of low and high membership",
-    subtitle = "With global mean (dotted line) and strata mean (solid line)",
-    x = "Models",
-    y = "Predicted Values"
-  ) +
+  labs(x = "Group", y = "Predicted Outcome", title = "Predicted Outcomes by Group") +
   theme_minimal() +
-  facet_wrap(~strata) +  # Facet by strata
-  # Add a horizontal line at the mean of "observed" for each strata
-  geom_hline(data = observed_means, aes(yintercept = Observed_Mean, color = "Observed Mean"),
-             linetype = "solid", size = 0.4, color = "black") +
-  geom_hline(aes(yintercept = global_mean), linetype = "dashed", size = 0.2, color = "black")
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
+plot_data <- random_effects %>%
+  separate(group, 
+           into = c("hh_value_cat", "health_dens_cat", "edu_dens_cat", 
+                    "env_dens_cat", "nbhd_dens_cat", "rural_area_cat"), 
+           sep = ":")
+
+
+# Sort groups by predicted values for better visualization
+
+
+ggplot(df_2020_mzs, aes(x = rural_area_cat, y = m4Am, fill = hh_value_cat)) +
+  geom_boxplot() +
+  facet_grid(health_dens_cat ~ edu_dens_cat) +
+  labs(x = "Health Density Category", y = "Predicted Outcome",
+       title = "Predicted Outcomes by Health Density and Education Level") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3") 
+
+
+plot_data <- plot_data %>%
+  mutate(combined_category = paste(hh_value_cat, rural_area_cat, sep = ":"))
+
+ggplot(plot_data, aes(x = combined_category, y = adjusted, fill = rural_area_cat)) +
+  geom_bar() +
+  facet_wrap(~ edu_dens_cat) +
+  labs(x = "Combined Category (Household Value: Rural Area)", y = "Predicted Outcome",
+       title = "Distribution of Predicted Outcomes by Combined Categories") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_brewer(palette = "Pastel1")
+
+ggplot(plot_data, aes(x = hh_value_cat, y = crude_rate, fill = health_dens_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ rural_area_cat) +
+  labs(x = "Household Value Category", y = "Predicted Outcome",
+       title = "Predicted Outcomes by Grouping Variables") +
+  theme_minimal()
+
+ggplot(plot_data, aes(x = hh_value_cat, y = adjusted, fill = health_dens_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ rural_area_cat) +
+  labs(x = "Household Value Category", y = "Predicted Outcome",
+       title = "Predicted Outcomes by Grouping Variables") +
+  theme_minimal()
+
+
+#Extracting random intercept 95% ci 
+
+rr <- ranef(m4)
+rr <- as.data.frame(rr)
+
+# Critical Z-value for 95% CI
+z_value <- qnorm(0.975)  # 1.96
+
+# Calculate the lower and upper bounds of the 95% CI
+rr$lower <- rr$condval - z_value * rr$condsd
+rr$upper <- rr$condval + z_value * rr$condsd
 
 ```
 
-
-
-
-
-#Bayesian approach
-This is not included in the manuscript but it provides an alternative approach closely aligned with previous examples of MAIHDA.
-For ease of comparison, GLMM was used in the manuscript, but the BRMS models produce the same results. 
 
 ```{r}
 
-brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata), df_mort_95, family = "gaussian",
-                            warmup = 5000, iter = 10000, 
-                            chains = 1, seed = 195)
-summary(brms1)
-loo(brms1) #looic 30595.5
-mcmc_plot(brms1)
-icc(brms1) #0.352
-plot(brms1, variable = "^b", regex = TRUE)
+# Step 1: Extract fixed effects and random effects
+fixed_effects <- fixef(m4)$cond
+random_effects <- ranef(m4, condVar = TRUE)
+random_effects_df <- as.data.frame(random_effects)
 
-#VPC 
-ranef_var <- VarCorr(brms1)
+# Step 2: Combine fixed and random effects for predictions
+# Assuming intercept-only model for simplicity
+intercept <- fixed_effects["(Intercept)"]
+random_effects_df$predicted <- intercept + random_effects_df$condval
 
-strata_sd <- ranef_var$strata[[1]]
-strata_var <- strata_sd^2
+# Step 3: Calculate total variance (fixed + random)
+# Note: For simplicity, we assume no additional fixed-effect uncertainty
+random_effects_df$pred_var <- random_effects_df$condsd^2
+random_effects_df$se <- sqrt(random_effects_df$pred_var)
 
-residual_sd <- ranef_var$residual__[[1]]
-residual_var <- residual_sd^2
+# Step 4: Compute 95% CI
+z_value <- qnorm(0.975)  # 1.96 for 95% CI
+random_effects_df$lower <- random_effects_df$predicted - z_value * random_effects_df$se
+random_effects_df$upper <- random_effects_df$predicted + z_value * random_effects_df$se
 
-vpc_strata <- strata_var / (strata_var + residual_var)
-vpc_strata #0.3455358 (0.2791841, 0.4141902)
+# View results
+print(random_effects_df)
 
-#Model 2
+random_effects_df$exp_pred <- exp(random_effects_df$predicted)
+random_effects_df$exp_lower <- exp(random_effects_df$lower)
+random_effects_df$exp_upper <- exp(random_effects_df$upper)
 
-brms2 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(brms2)
-loo(brms2) #looic 30463.3
-mcmc_plot(brms2)
-icc(brms2) #0.134
+# Assuming `random_effects_df` contains the predictions and CIs
+# `Group` is the identifier for random effects (e.g., `Subject`)
 
-#VPC 
-ranef_var <- VarCorr(brms2)
+# Example data from the previous calculation
 
-strata_sd <- ranef_var$strata[[1]]
-strata_var <- strata_sd^2
+# Plot
 
-residual_sd <- ranef_var$residual__[[1]]
-residual_var <- residual_sd^2
+random_effects_df <- random_effects_df %>%
+  mutate(Group = reorder(grp, exp_pred))
 
-vpc_strata <- strata_var / (strata_var + residual_var)
-vpc_strata #0.1300675 (0.08964915, 0.1821352)
+ggplot(random_effects_df, aes(x = grp, y = exp_pred)) +
+  geom_point(size = 3, color = "blue") +  # Predicted outcomes
+  geom_errorbar(aes(ymin = exp_lower, ymax = exp_upper), width = 0.2, color = "red") +  # 95% CI
+  theme_minimal() +
+  labs(
+    title = "Predicted Group Outcomes with 95% Confidence Intervals",
+    x = "Group",
+    y = "Predicted Outcome"
+  ) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
-#PCV
-
-0.1197096 / 0.3472363 #0.3447497
-
-conditional_effects(brms2)
-loo(brms2) #looic 30479.8
-pp_check(brms2)
-
-
-#Model 3 traditional MAIHDA
-
-brms3 <- brm(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(brms3)
-conditional_effects(brms3)
-loo(brms3) #looic 30587.2
-pp_check(brms3)
-
-#VPC 
-ranef_var <- VarCorr(brms3)
-
-strata_sd <- ranef_var$strata[[1]]
-strata_var <- strata_sd^2
-
-residual_sd <- ranef_var$residual__[[1]]
-residual_var <- residual_sd^2
-
-vpc_strata <- strata_var / (strata_var + residual_var)
-vpc_strata #0.04939537 (0.02700924, 0.0810209)
-
-#PCV
-
-0.04939537 / 0.3455358 #0.142953
-
-
-#model 4
-
-brms4 <- brm(covid_mortality_rate_100k ~ strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat, df_mort_95, family = "gaussian")
-summary(brms4)
-
-
-#model 5
-
-brms5 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total)*standardise(median_income_12_mo)*standardise(P_county_male_pop)*standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(brms5)
-plot(brms5)
-conditional_effects(brms5)
-loo(brms2) #looic 30479.8
-pp_check(brms2)
-
-#VPC 
-ranef_var <- VarCorr(brms5)
-
-strata_sd <- ranef_var$strata[[1]]
-strata_var <- strata_sd^2
-
-residual_sd <- ranef_var$residual__[[1]]
-residual_var <- residual_sd^2
-
-vpc_strata <- strata_var / (strata_var + residual_var)
-vpc_strata #0.1212295. (0.08, 0.18)
-
-
-#comparison
-
-loo(brms1, brms2, brms3, brms5)
 
 ```
 
-#Bayesian
+
+#2021 Analysis
+
+#Strata
+```{r}
+## have to add all the count variables together for 2021
+
+#Domains:
+# Neighborhood density and access
+# healthcare access
+# healthy behavior access, parks and grocery stores
+# School density, access to public education
+# median home value, socioeconomic stability
+# rural-urban area ratio, rural health determinant
+
+#MIAHDA examples use sex, race, education, income, age, and region of US in categories ranging from binary to categories of 4-6 levels 
+
+# dens_100k_n_houses + dens_100k_school_count + dens_100k_n_libraries03_17 + dens_100k_n_all_hospitals + dens_100k_n_outpatient_ctr_17 + med_household_value + dens_100k_COUNT_OPEN_PARKS + dens_100k_n_grocery_17 + rural_urb_area_ratio
+
+
+#Strata
+#socioeconomic
+df_2021_mzs$log_crude_rate_100k <- log(1 + df_2021_mzs$Crude_Rate_100k)
+
+summary(df_2021_mzs$log_crude_rate_100k)
+
+ggplot(df_2021_mzs, aes(med_household_value, log_crude_rate_100k)) +
+  geom_point()
+
+df_2021_mzs$hh_value_cat <- cut(df_2021_mzs$med_household_value, breaks = quantile(df_2021_mzs$med_household_value, probs = 0:3 / 3), include.lowest = TRUE, labels = c("medval1", "medval2", "med_val3"))
+
+df_2021_mzs$hh_value_cat <- as.factor(df_2021_mzs$hh_value_cat)
+
+ggplot(df_2021_mzs, aes(hh_value_cat, log_crude_rate_100k)) +
+  geom_boxplot()
+
+hh_model <- glmmTMB(log_crude_rate_100k ~ hh_value_cat, df_2021_mzs)
+summary(hh_model)
+
+#environment that promotes healthy behavior
+
+df_2021_mzs$combined_env_dens <- df_2021_mzs$dens_100k_n_grocery_17 + df_2021_mzs$dens_100k_COUNT_OPEN_PARKS
+
+df_2021_mzs$combined_env_count <- df_2021_mzs$n_grocery_17 + df_2021_mzs$COUNT_OPEN_PARKS
+
+df_2021_mzs$env_dens_cat <- cut(df_2021_mzs$combined_env_dens, breaks = quantile(df_2021_mzs$combined_env_dens, probs = 0:2 / 2), include.lowest = TRUE, labels = c("env1", "env2"))
+
+df_2021_mzs$env_dens_cat <- as.factor(df_2021_mzs$env_dens_cat)
+
+ggplot(df_2021_mzs, aes(env_dens_cat, log_crude_rate_100k)) +
+  geom_boxplot()
+
+env_model <- glmmTMB(log_crude_rate_100k ~ env_dens_cat , df_2021_mzs)
+summary(env_model)
+
+# education 
+
+df_2021_mzs$edu_dens <- df_2021_mzs$dens_100k_school_count + df_2021_mzs$dens_100k_n_libraries03_17
+
+df_2021_mzs$edu_count <- df_2021_mzs$school_count + df_2021_mzs$n_libraries03_17
+
+df_2021_mzs$edu_dens_cat <- cut(df_2021_mzs$edu_dens, breaks = quantile(df_2021_mzs$edu_dens, probs = 0:2 / 2), include.lowest = TRUE, labels = c("edu1", "edu2"))
+
+df_2021_mzs$edu_dens_cat <- as.factor(df_2021_mzs$edu_dens_cat)
+
+ggplot(df_2021_mzs, aes(edu_dens_cat, log_crude_rate_100k)) +
+  geom_boxplot()
+
+school_model <- glmmTMB(log_crude_rate_100k ~ edu_dens_cat, df_2021_mzs)
+summary(school_model) #other strata were negative
+
+
+# healthcare
+
+df_2021_mzs$dens_hosp_and_outpt <- df_2021_mzs$dens_100k_n_all_hospitals + df_2021_mzs$dens_100k_n_outpatient_ctr_17
+
+df_2021_mzs$count_hosp_and_outpt <- df_2021_mzs$n_all_hospitals + df_2021_mzs$n_outpatient_ctr_17
+
+df_2021_mzs$health_dens_cat <- cut(df_2021_mzs$dens_100k_n_outpatient_ctr_17, breaks = quantile(df_2021_mzs$dens_100k_n_outpatient_ctr_17, probs = 0:2 / 2), include.lowest = TRUE, labels = c("hlthcr1", "hlthcr2"))
+
+df_2021_mzs$health_dens_cat <- as.factor(df_2021_mzs$health_dens_cat)
+
+table(df_2021_mzs$health_dens_cat)
+
+ggplot(df_2021_mzs, aes(health_dens_cat, log_crude_rate_100k)) +
+  geom_boxplot() #not significantly assoc
+
+health_model <- glmmTMB(log_crude_rate_100k ~ health_dens_cat, df_2021_mzs)
+summary(health_model) #highest is negatively assoc significant
+
+
+#Neighborhood density and public mobility access
+df_2021_mzs$combined_neighborhood_qual <- df_2021_mzs$dens_100k_n_houses + df_2021_mzs$dens_100k_COUNT_NTM_STOPS
+df_2021_mzs$combined_neighborhood_qual_count <- df_2021_mzs$n_houses + df_2021_mzs$COUNT_NTM_STOPS
+
+df_2021_mzs$nbhd_dens_cat <- cut(df_2021_mzs$combined_neighborhood_qual, breaks = quantile(df_2021_mzs$combined_neighborhood_qual, probs = 0:2 / 2), include.lowest = TRUE, labels = c("nbhd1", "nbhd2"))
+
+df_2021_mzs$nbhd_dens_cat <- as.factor(df_2021_mzs$nbhd_dens_cat)
+
+table(df_2021_mzs$nbhd_dens_cat)
+
+ggplot(df_2021_mzs, aes(nbhd_dens_cat, log_crude_rate_100k)) +
+  geom_boxplot() #not significantly assoc
+
+nbhd_model <- glmmTMB(log_crude_rate_100k ~ nbhd_dens_cat, df_2021_mzs)
+summary(nbhd_model) #highest is negatively assoc significant
+
+#Rural-urban area ratio
+
+ggplot(df_2021_mzs, aes(rural_urb_area_ratio, log_crude_rate_100k))+
+  geom_point()
+
+Desc(df_2021_mzs$rural_urb_area_ratio)
+
+#df_2021_mzs$rural_area_cat <- cut(df_2021_mzs$norm_pct_rural_area, breaks = quantile(df_2021_mzs$norm_pct_rural_area, probs = 0:2 / 2), include.lowest = TRUE, labels = c("rural1", "rural2"))
+
+df_2021_mzs$rural_area_cat <- ifelse(df_2021_mzs$rural_urb_area_ratio > 50, "rural", "urban")
+
+df_2021_mzs$rural_area_cat <- as.factor(df_2021_mzs$rural_area_cat)
+
+table(df_2021_mzs$rural_area_cat)
+
+ggplot(df_2021_mzs, aes(rural_area_cat, log_crude_rate_100k)) +
+  geom_boxplot() #not significantly assoc
+
+rural_model <- glmmTMB(log_crude_rate_100k ~ rural_area_cat, df_2021_mzs)
+summary(rural_model) #highest is negatively assoc significant
+
+
+
+
+df_2021_mzs$strata <- paste(df_2021_mzs$hh_value_cat, ", ", 
+                        df_2021_mzs$edu_dens_cat, ", ",
+                        df_2021_mzs$env_dens_cat, ", ",
+                        df_2021_mzs$health_dens_cat, ", ",
+                        df_2021_mzs$nbhd_dens_cat, ", ",
+                        df_2021_mzs$rural_area_cat)
+
+table(df_2021_mzs$strata) #hmm hmm hmm
+
+length(unique(df_2021_mzs$strata))
+
+
+strata_df <- df_2021_mzs %>%
+  group_by(strata) %>%
+  mutate(strataN = n())
+
+Desc(strata_df$Crude_Rate_100k)
+
+total_rows <- length(strata_df$strataN)
+rows_with_20_or_more <- sum(strata_df$strataN >= 20)
+percentage <- (rows_with_20_or_more / total_rows) * 100
+
+print(percentage)
+
+#Strata means 
+
+strata_means <- df_2021_mzs %>% 
+  group_by(strata) %>%
+  summarise(across(where(is.numeric), ~mean(., na.rm = TRUE)))
+
+Desc(strata_means$Crude_Rate_100k)
+
+ggplot(strata_means, aes(log_crude_rate_100k)) +
+  geom_histogram(bins = 20, 
+                 fill = "white",
+                 color = "blue")
+  
+
+qqnorm(strata_means$log_crude_rate_100k)
+```
+
 
 ```{r}
-brms1 <- brm(covid_mortality_rate_100k ~ 1 + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(brms1)
-check_model(brms1)
-loo(brms1) #looic 30676
 
 
-brms2 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total) + standardise(median_income_12_mo) + standardise(P_county_male_pop) + standardise(P_non_white_only_pop) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(brms2)
-plot(brms2)
+
+#GglmmTMB
 
 
-brms3 <- brm(covid_mortality_rate_100k ~ strata_sex_cat + strata_age_cat + strata_income_cat + strata_race_cat + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(brms3)
+m1_21 <- glmmTMB(log_crude_rate_100k ~ 1 + (1 | strata), data = df_2021_mzs)
+summary(m1_21) #0.08064
+BIC(m1_21) #7165.602
+
+0.06349 / (0.06349 + 0.57641) #10%
+
+check_model(m1_21)
+
+icc(m1_21) #0.099 -- ~10% of the variation in mortality rate is due to which strata a particular observation belongs to. Lower than 2020.
+
+#partial adjusted
+
+m_hh_value <- glmmTMB(log_crude_rate_100k ~ standardise(med_household_value) +(1 | strata), data = df_2021_mzs)
+icc(m_hh_value)$ICC_adjusted #0.108298
+ 
+m_edu <- glmmTMB(log_crude_rate_100k ~  standardise(edu_count) +(1 | strata), data = df_2021_mzs)
+icc(m_edu)$ICC_adjusted #0.1207783
+
+m_env <- glmmTMB(log_crude_rate_100k ~ standardise(combined_env_count) + (1 | strata), data = df_2021_mzs)
+icc(m_env)$ICC_adjusted #0.1199945
+
+m_nbhd <- glmmTMB(log_crude_rate_100k ~ standardise(combined_neighborhood_qual_count) +  (1 | strata), data = df_2021_mzs)
+icc(m_nbhd)$ICC_adjusted #0.1208264
+
+m_health <- glmmTMB(log_crude_rate_100k ~ standardise(count_hosp_and_outpt) +  (1 | strata), data = df_2021_mzs)
+icc(m_health)$ICC_adjusted #0.1208154
+
+m_rural <- glmmTMB(log_crude_rate_100k ~ standardise(rural_urb_area_ratio) +  (1 | strata), data = df_2021_mzs)
+icc(m_rural)$ICC_adjusted #0.1215963
+
+compare_parameters(m_hh_value, m_edu, m_env, m_nbhd, m_health, m_rural, exponentiate = TRUE) #hh value level 2 is most informative, then food density; hosp-nursing level 2 and law enforcement level 2 density are least strong predictor
+
+#Variance
+
+v_null <- get_variance(m3)
+v_hhvalue <- get_variance(m_hh_value)
+v_edu <- get_variance(m_edu)
+v_env <- get_variance(m_env)
+v_nbhd <- get_variance(m_nbdh)
+v_health <- get_variance(m_health)
+v_rural <- get_variance(m_rural)
+
+# PCV (proportional change in between-strata variance)
+# from null-model to hh value -model
+(v_null$var.random - v_hhvalue$var.random) / v_null$var.random
+# 0.7006356 most relevant predictor, down from 2020
+
+# PCV from null-model to schools-model 
+(v_null$var.random - v_schools$var.random) / v_null$var.random 
+# 0.4086684, much higher
+
+# PCV from null-model to environment-model
+(v_null$var.random - v_env$var.random) / v_null$var.random
+# 0.4088619
+
+#> # PCV from null-model to food-model
+(v_null$var.random - v_food$var.random) / v_null$var.random
+# 0.3913844 most relevant predictor
+
+#> # PCV from null-model to health-model
+(v_null$var.random - v_health$var.random) / v_null$var.random
+# 0.3543729
+
+#> # PCV from null-model to law-model
+(v_null$var.random - v_law$var.random) / v_null$var.random
+# -0.3453629
+
+m2_2021 <- glmmTMB(log_crude_rate_100k ~ scale(med_household_value) + standardise(edu_count) +  standardise(combined_neighborhood_qual_count) + standardise(count_hosp_and_outpt) + standardise(combined_env_count) + standardise(rural_urb_area_ratio) + (1 | hh_value_cat:health_dens_cat:edu_dens_cat:env_dens_cat:nbhd_dens_cat:rural_area_cat), data = df_2021_mzs)
+m2_2021 %>% tbl_regression(exponentiate = TRUE)
+BIC(m2_2021) #6958.795
+summary(m2_2021) #health and law are insignificant
+icc(m2_2021)$ICC_adjusted #0.07639526 it went from 12% to 9%, not as big of a jump as usual.
+
+0.04559 / (0.04559 + 0.55123) #7%
+
+0.04559 / 0.06349 #72
 
 
-loo(brms1, brms3)
+predictions <- predict_response(
+  m2_2021,
+  c("nbhd_dens_cat", "hh_value_cat", "env_dens_cat", "edu_dens_cat"),
+  type = "random",
+  interval = "confidence"
+)
+plot(predictions)
 
-brms4 <- brm(covid_mortality_rate_100k ~ strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat, df_mort_95, family = "gaussian")
-summary(brms4)
+predictions_output <- test_predictions(predictions)
+
+#this is promising
+
+#colnames(df_2021_mzs)
+
+#m3_2021 <- glmmTMB(log_crude_rate_100k ~ scale(med_household_value) + edu_dens +  combined_neighborhood_qual + dens_100k_n_outpatient_ctr_17 + combined_env_dens + rural_urb_area_ratio + (1 | hh_value_cat:health_dens_cat:edu_dens_cat:env_dens_cat:nbhd_dens_cat:rural_area_cat), data = df_2021_mzs)
+#m3_2021 %>% tbl_regression(exponentiate = TRUE)
+#AIC(m3_2021) #5675.701
+#summary(m3_2021) #health and law are insignificant
+#icc(m3_2021)$ICC_adjusted #0.02539545 it went from 12% to 2%, not as big of a jump as usual.
 
 
-brms5 <- brm(covid_mortality_rate_100k ~ standardise(median_age_total)*standardise(median_income_12_mo)*standardise(P_county_male_pop)*standardise(white_non_ratio) + (1 | strata_sex_cat:strata_age_cat:strata_income_cat:strata_race_cat), df_mort_95, family = "gaussian")
-summary(brms5)
-plot(brms5)
+
+#predictions <- predict_response(
+#  m3_2021,
+#  c("community_dens_cat", "hh_value_cat", "law_dens_cat"),
+#  type = "random"
+#)
+#plot(predictions)
+
+#predictions_output <- test_predictions(predictions)
+
+#Extracting random effects
+random_effects <- ranef(m2_2021)$cond$`hh_value_cat:health_dens_cat:edu_dens_cat:env_dens_cat:nbhd_dens_cat:rural_area_cat`
+
+# Add fixed effect intercept to random effects (optional)
+fixed_intercept <- fixef(m2_2021)$cond[1]
+random_effects <- data.frame(
+  group = rownames(random_effects),
+  random_intercept = random_effects[, 1],
+  adjusted = random_effects[, 1] + fixed_intercept
+)
+
+random_effects$crude_rate <- exp(random_effects$adjusted)
+
+#random_effects <- random_effects[order(random_effects$crude_rate), ]
+
+ggplot(random_effects, aes(crude_rate)) +
+  geom_histogram()
+
+random_effects <- random_effects %>%
+  mutate(group = reorder(group, crude_rate))
+
+ggplot(random_effects, aes(x = group, y = crude_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "Group", y = "Predicted Outcome", title = "Predicted Outcomes by Group") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 
 ```
+
+
+#strata means
+
+
+```{r}
+
+strata_means <- df_2021_mzs %>% 
+  group_by(strata) %>%
+  summarise(across(where(is.numeric), ~mean(., na.rm = TRUE)))
+
+
+ggplot(df_2021_mzs, aes(Crude_Rate_100k)) +
+  geom_histogram(bins = 40, 
+                 fill = "white",
+                 color = "blue")
+  
+
+qqnorm(strata_means$Crude_Rate_100k)
+
+```
+
+
+
+
+
+```{r}
+#m5 adding state as fixed effect -- sensitivity analysis? Important for vaccine
+
+by(df_2021_mzs$log_crude_rate_100k, df_2021_mzs$StateAbbr, summary)
+
+class(df_2021_mzs$StateAbbr)
+
+df_2021_mzs$state_fac <- as.factor(df_2021_mzs$StateAbbr)
+
+m5 <- glmmTMB(log_crude_rate_100k ~ relevel(state_fac, ref = "VT") + (1 | hh_value_cat), data = df_2021_mzs)
+summary(m5)
+AIC(m5) #5141.842 this is the lowest AIC and highest ICC
+
+icc(m5)$ICC_adjusted #0.09228589, only controlling for state increases RE variance
+
+predictions <- predict_response(
+  m5,
+  c("state_fac"),
+  type = "random"
+)
+plot(predictions)
+
+predictions_output <- test_predictions(predictions) 
+
+compare_performance(m4, m5, rank = TRUE) #m5 preferred
+
+#m6 state as random effect and strata as fixed
+
+m6 <- glmmTMB(log_crude_rate_100k ~ strata + ( 1  | state_fac), data = df_2021_mzs)
+summary(m6)
+AIC(m6) #5362.895
+
+icc(m6)$ICC_adjusted #0.4695365 state accounts for nearly 50% of variance in deaths
+
+check_model(m6)
+
+compare_performance(m5, m6, rank = TRUE) #m5 preferred
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# From MAIHDA tutorial 
+
+```{r}
+##############################################
+# Estimate linear model 1A
+##############################################
+
+# Fit the two-level linear regression with no covariates
+model1A <- glmmTMB(log_crude_rate_100k ~ (1|strata), data=df_2020_mzs)
+summary(model1A)
+
+# This produces a model output showing the level 2 variance (or, alternatively,
+# it's standard deviation) and the same for level 1 (labelled 
+# "strata (Intercept)" and "Residual", respectively)
+
+# predict the mean outcome
+df_2020_mzs$m1Am <- predict(model1A)
+# Calculated as the fixed-portion linear prediction plus contributions based on 
+# predicted random effects.
+
+
+############################
+# Estimate Linear model 1B
+##########################
+
+# Fit the two-level linear regression with covariates
+model1B <- glmmTMB(log_crude_rate_100k ~ hh_value_cat + schools_cat + rural_pop_bin + relig_cat + (1|strata), 
+                data=df_2020_mzs)
+summary(model1B)
+
+# predict the mean outcome and confidence intervals of prediction
+m1Bm <- predict(model1B, level=0.95, se.fit = TRUE)
+# note that, unlike the stata code, this code combines the fixed and random part
+# uncertainty. This saves a step later in comparison to the stata code. It also
+# creates a new dataframe for these predictions, with one row per strata.
+
+# Calculate the 95% prediction interval
+alpha <- 0.05
+z <- qnorm(1 - alpha / 2)  # 95% CI
+
+# Lower and upper bounds of the prediction interval
+lower_bound <- m1Bm$fit - z * m1Bm$se.fit
+upper_bound <- m1Bm$fit + z * m1Bm$se.fit
+
+# Combine the results into a data frame
+prediction_intervals <- data.frame(
+  fit = m1Bm$fit,
+  lower = lower_bound,
+  upper = upper_bound
+)
+
+
+# Create an identifier variable in the new dataframe, called "id"
+prediction_intervals <- mutate(prediction_intervals, id=row_number())
+
+# predict the strata random effects and associated SEs
+random_eff <- ranef(model1B)
+print(random_eff)
+
+# Simulate random effects using the model
+simulated_data <- simulate(model1B, nsim = 100)  # Simulate 100 new datasets
+
+# View the first simulated dataset
+head(simulated_data[[1]])
+
+# Extract the observed values from your original dataset
+observed_values <- df_2020_mzs$log_crude_rate_100k
+
+# Summarize the simulated datasets
+simulated_means <- colMeans(simulated_data)
+simulated_variances <- apply(simulated_data, 2, var)
+
+simulated_means <- rowMeans(simulated_data)
+
+# Compare observed vs. simulated values (mean and variance)
+cat("Mean of observed data:", mean(observed_values), "\n")
+cat("Mean of simulated data:", mean(simulated_means), "\n")
+cat("Variance of observed data:", var(observed_values), "\n")
+cat("Variance of simulated data:", mean(simulated_variances), "\n")
+
+# Plot the observed vs. simulated average values
+plot(observed_values, simulated_means, 
+     main = "Observed vs. Average Simulated Values", 
+     xlab = "Observed Values", ylab = "Average Simulated Values")
+abline(0, 1, col = "red")  # Add reference line where observed = average simulated
+
+# Optionally, create a histogram of the residuals
+sim_residuals <- simulated_means - observed_values
+
+hist(sim_residuals, main = "Histogram of Residuals from mean values of all Simulation",
+     xlab = "Residuals", col = "lightblue", border = "black")
+
+#simulated data seem to mirror observed data just fine
+
+
+```
+
+
+
+
+
+#Spatial analysis SAR models
+
+```{r}
+
+df_2020_mzs_sf <- st_sf(df_2020_mzs)
+
+ggplot(data = df_2020_mzs_sf, aes(fill = Crude_Rate_100k)) + 
+  geom_sf()
+
+df_2020_mzs_sf$Crude_Rate_100k <- ifelse(is.na(df_2020_mzs_sf$Crude_Rate_100k), 0, df_2020_mzs_sf$Crude_Rate_100k)
+
+nb <- poly2nb(df_filtered_sf, queen = TRUE)
+
+lw <- nb2listw(nb, style="W", zero.policy=TRUE)
+
+# Check how many neighbors each polygon has
+neighbor_counts <- sapply(nb, length)
+
+summary(neighbor_counts)
+# Identify polygons with no neighbors (i.e., isolated)
+isolated_polygons <- which(neighbor_counts == 1)
+
+# Print the list of isolated polygons
+print(isolated_polygons)
+
+# Alternatively, if you're working with sf objects, do the same:
+df_filtered_sf <- df_2020_mzs_sf[-isolated_polygons, ]
+
+mort.lag <- lag.listw(lw, df_2020_mzs_sf$Crude_Rate_100k)
+
+plot(mort.lag ~ df_2020_mzs_sf$Crude_Rate_100k, pch = 16, asp = 1)
+M1 <- lm(mort.lag ~ df_2020_mzs_sf$Crude_Rate_100k)
+abline(M1, col="blue")
+coef(M1)[2] #Moran's I = 0.35
+
+#Moran without spatial lag:
+
+moran.test(df_2020_mzs_sf$Crude_Rate_100k, lw, alternative="greater") #0.346
+
+#Monte Carlo Moran
+
+MC<- moran.mc(df_2020_mzs_sf$Crude_Rate_100k, lw, nsim=999, alternative="greater")
+MC
+
+plot(MC)
+
+
+#plotting random
+
+set.seed(131)
+df_2020_mzs_sf$rand1 <- sample(df_2020_mzs_sf$Crude_Rate_100k, length(df_2020_mzs_sf$Crude_Rate_100k), replace = FALSE)
+df_2020_mzs_sf$rand2 <- sample(df_2020_mzs_sf$Crude_Rate_100k, length(df_2020_mzs_sf$Crude_Rate_100k), replace = FALSE)
+df_2020_mzs_sf$rand3 <- sample(df_2020_mzs_sf$Crude_Rate_100k, length(df_2020_mzs_sf$Crude_Rate_100k), replace = FALSE)
+
+tm_shape(df_2020_mzs_sf) + tm_fill(col=c("Crude_Rate_100k", "rand1", "rand2", "rand3"),
+                      style="quantile", n=8, palette="Greens", legend.show = FALSE) +
+              tm_facets( nrow=1)
+
+#Local moran
+
+local_moran <- localmoran(df_2020_mzs_sf$Crude_Rate_100k, lw)
+
+# View the results (you can extract individual statistics for each observation)
+
+print(local_moran)
+
+ggplot(df_2020_mzs_sf) +
+  geom_sf(aes(fill = mort.lag)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Choropleth Map of Spatial Data")
+
+
+#SAR models
+
+
+sar_model <- lagsarlm(log(Crude_Rate_100k+1) ~ P_count_PGE70_16_20, data = df_filtered_sf, listw = lw)
+summary(sar_model)
+residuals_sar <- residuals(sar_model)
+moran.test(residuals_sar, lw) #no significant autocorrelation observed in the residuals
+
+
+
+```
+
 
 
